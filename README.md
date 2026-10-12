@@ -48,9 +48,18 @@ Next.js 16 (App Router, Server Actions) + Supabase (Postgres, service-role key s
 
 ## Vercel par deploy
 
-1. Repo ko [vercel.com/new](https://vercel.com/new) par import karo
-2. Environment Variables me wahi sab keys daalo jo `.env.example` me hain
-3. Deploy — har push par automatic redeploy hoga
+Project Vercel ke liye ready hai — koi `vercel.json` ki zaroorat nahi (Next.js auto-detect hota hai,
+Node `>=20.9` `package.json` ke `engines` me pinned hai).
+
+1. Pehle Supabase me `supabase/schema.sql` run kar lo (upar Setup step 1)
+2. Repo ko [vercel.com/new](https://vercel.com/new) par import karo — Framework Preset: **Next.js**,
+   Build/Output settings default rehne do
+3. **Environment Variables** me `.env.example` ki saari keys daalo (Production + Preview dono me).
+   Zaroori: `APP_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+   `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`. Baaki optional hain
+4. Deploy — har push par automatic redeploy hoga
+5. Tip: Vercel → Settings → Functions → Region ko apne Supabase project ke region ke paas rakho
+   (fast page loads)
 
 ### "Page load nahi ho raha" / batch click par kuch nahi hota
 
