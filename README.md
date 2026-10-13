@@ -18,8 +18,11 @@ kisi ek website ko baar-baar spam nahi.
      - **Sirf Contact page:** jinka contact page hai unke message ready; aap khud contact page kholke
        paste-submit karte ho, phir "Sent" mark karte ho (har website ka apna real, manual submission)
      - **Dono:** email wale ko email automatic + contact page wale ka message ready
-  - List me ek hi business (same email/website) do baar ho to "Duplicate" dikhta hai aur use ek hi
-    message jaata hai — ek inbox/form par ek saath kai copies bhejna spam hai aur aapka SMTP account block karwa deta hai
+  - **Same website kai baar (testing):** list me ek hi website jitni baar likhoge, contact page ke utne alag
+    message cards banenge (har line apna slot, har "Sent" history me alag record). Email fir bhi har business ko
+    ek hi baar jaata hai — ek inbox par kai copies se aapka SMTP account block ho jaata hai
+  - Ek round ke baad woh website "Contacted" ho jaati hai; dobara test karna ho to `/leads` par uska status wapas
+    **New** kar do
 - **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
   configurable din baad, aur ek limited baar
 - **Kitne bhejne hai, aap chuno:** 1 se `BATCH_SIZE` tak — aaj 10 chahiye to 10, kal 20 chahiye to 20

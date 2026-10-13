@@ -34,13 +34,14 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
   const [loaded, setLoaded] = useState<LoadedTarget[] | null>(null)
   const [result, setResult] = useState<BatchResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [sentIds, setSentIds] = useState<Set<string>>(new Set())
-  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [sentSlots, setSentSlots] = useState<Set<number>>(new Set())
+  const [copiedSlot, setCopiedSlot] = useState<number | null>(null)
 
   const lineCount = listText.split(/\r?\n/).filter((l) => l.trim()).length
-  // Har business ek hi baar — duplicate lines aur samajh na aayi lines yahan se hat jaati hain
-  const sendable = (loaded ?? []).filter((t) => t.lead && !t.duplicate)
-  const withEmail = sendable.filter((t) => t.lead!.email).length
+  // Samajh na aayi lines hat jaati hain. Same website kai baar ho to har line alag slot hai
+  // (contact page card har line ka), par email har business ko ek hi baar jaata hai.
+  const sendable = (loaded ?? []).filter((t) => t.lead)
+  const withEmail = new Set(sendable.filter((t) => t.lead!.email).map((t) => t.lead!.id)).size
   const withContact = sendable.filter((t) => t.lead!.contact_url).length
 
   // count ko hamesha 1..batchSize ke beech rakhte hain, khali box se bhi crash na ho
@@ -79,7 +80,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         const res = await sendToLoaded(mode, kind, sendable.map((t) => t.lead!.id))
         if (res.error) setError(res.error)
         setResult(res)
-        setSentIds(new Set())
+        setSentSlots(new Set())
         router.refresh()
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Kuch galat ho gaya, dobara try karein')
@@ -87,24 +88,24 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
     })
   }
 
-  async function copyMessage(id: string, text: string) {
+  async function copyMessage(slot: number, text: string) {
     try {
       await navigator.clipboard.writeText(text)
-      setCopiedId(id)
-      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500)
+      setCopiedSlot(slot)
+      setTimeout(() => setCopiedSlot((c) => (c === slot ? null : c)), 1500)
     } catch {
       // Clipboard blocked ho to bhi textarea se manually copy ho sakta hai
     }
   }
 
   function markSent(item: AssistedLead) {
-    setSentIds((prev) => new Set(prev).add(item.lead.id))
+    setSentSlots((prev) => new Set(prev).add(item.slot))
     startTransition(async () => {
       const res = await markContactFormSent(item.lead.id, kind, item.subject, item.body)
       if (!res.ok) {
-        setSentIds((prev) => {
+        setSentSlots((prev) => {
           const next = new Set(prev)
-          next.delete(item.lead.id)
+          next.delete(item.slot)
           return next
         })
         setError(res.error ?? 'Mark sent fail hua')
@@ -157,7 +158,8 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         {source === 'list' ? (
           <div className="field">
             <label htmlFor="list">
-              Har line me ek: email ya website / contact-page URL (max {batchSize}). Naam bhi dena ho to: <code>Naam, email-ya-url</code>
+              Har line me ek: email ya website / contact-page URL (max {batchSize}). Naam bhi dena ho to: <code>Naam, email-ya-url</code>.
+              Same website jitni baar likhoge, contact page ke utne alag message banenge.
             </label>
             <textarea
               id="list"
@@ -184,7 +186,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         {loaded && (
           <div style={{ marginTop: 14 }}>
             <p className="pill">
-              {sendable.length} businesses ready · {withEmail} ke paas email · {withContact} ke paas contact page
+              {sendable.length} ready · {withContact} contact page · {withEmail} email
             </p>
             {loaded.length === 0 && <p className="sub" style={{ marginTop: 8 }}>Abhi is category me koi lead ready nahi hai.</p>}
             {loaded.length > 0 && (
@@ -199,12 +201,12 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                 </thead>
                 <tbody>
                   {loaded.map((t, i) => (
-                    <tr key={i} style={{ opacity: t.lead && !t.duplicate ? 1 : 0.5 }}>
+                    <tr key={i} style={{ opacity: t.lead ? 1 : 0.5 }}>
                       <td>{i + 1}</td>
                       <td>
                         {t.lead?.business_name ?? t.input}
                         {t.note && (
-                          <div className="pill" style={{ color: t.lead && !t.duplicate ? 'var(--warn)' : 'var(--err)' }}>
+                          <div className="pill" style={{ color: t.lead ? 'var(--warn)' : 'var(--err)' }}>
                             {t.note}
                           </div>
                         )}
@@ -268,12 +270,12 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
           {result.assisted.length === 0 && <p className="sub">Load kiye hue businesses me kisi ka contact page link nahi hai.</p>}
 
           {result.assisted.map((item) => {
-            const done = sentIds.has(item.lead.id)
+            const done = sentSlots.has(item.slot)
             return (
-              <div className="leadcard" key={item.lead.id} style={{ opacity: done ? 0.5 : 1 }}>
+              <div className="leadcard" key={item.slot} style={{ opacity: done ? 0.5 : 1 }}>
                 <div className="top">
                   <span className="name">
-                    {item.lead.business_name}
+                    #{item.slot + 1} {item.lead.business_name}
                     {item.emailed && <span className="pill" style={{ color: 'var(--ok)', marginLeft: 8 }}>Email bhi gaya ✓</span>}
                   </span>
                   {item.lead.contact_url && (
@@ -282,8 +284,8 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                 </div>
                 <pre>{item.body}</pre>
                 <div className="actions">
-                  <button className="btn secondary small" onClick={() => copyMessage(item.lead.id, item.body)}>
-                    {copiedId === item.lead.id ? 'Copied ✓' : 'Message copy karein'}
+                  <button className="btn secondary small" onClick={() => copyMessage(item.slot, item.body)}>
+                    {copiedSlot === item.slot ? 'Copied ✓' : 'Message copy karein'}
                   </button>
                   <button className="btn small" disabled={done || pending} onClick={() => markSent(item)}>
                     {done ? 'Sent ✓' : 'Sent mark karein'}
@@ -299,13 +301,13 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
 }
 
 function modeHelp(mode: SendMode, withEmail: number, withContact: number): string {
-  if (mode === 'email') return `${withEmail} businesses ko automatic email (aapki SMTP se)`
+  if (mode === 'email') return `${withEmail} businesses ko automatic email (har business ko ek hi)`
   if (mode === 'contact_form') return `${withContact} contact pages ke message ready — aap paste-submit karo`
-  return `Email wale ${withEmail} ko email + contact page wale ${withContact} ke message ready`
+  return `${withEmail} ko email + ${withContact} contact page message ready`
 }
 
 function buttonLabel(mode: SendMode, n: number): string {
   if (mode === 'email') return `${n} loaded businesses ko email bhejo`
-  if (mode === 'contact_form') return `${n} loaded businesses ke contact messages taiyaar karo`
+  if (mode === 'contact_form') return `${n} contact page messages taiyaar karo`
   return `${n} loaded businesses ko email + contact page bhejo`
 }

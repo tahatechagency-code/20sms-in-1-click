@@ -38,6 +38,7 @@ async function logOutreach(
 }
 
 export type AssistedLead = {
+  slot: number // load ki hui list me kaunsi line — same website kai baar ho to har line ka alag card
   lead: Lead
   subject: string
   body: string
@@ -63,8 +64,7 @@ function emptyResult(mode: SendMode, error?: string): BatchResult {
 export type LoadedTarget = {
   input: string // user ne jo line likhi (ya leads list se aaya to business ka naam)
   lead: Lead | null // null = line samajh nahi aayi / save nahi ho payi
-  note?: string // warning: duplicate, pehle hi contact ho chuka, invalid…
-  duplicate?: boolean // list me yahi business pehle aa chuka — is line par alag se kuch nahi jaayega
+  note?: string // warning: pehle hi contact ho chuka, invalid…
 }
 
 export type LoadResult = { targets: LoadedTarget[]; error?: string }
@@ -87,7 +87,8 @@ export async function loadFromLeads(kind: TemplateKind, count?: number): Promise
 // Apni list: har line me ek email ya website/contact-page URL, chahe to aage naam:
 //   "Sharma Dental, info@sharmadental.com"  ya  "sharmadental.com/contact"
 // Har line ek lead se jud jaati hai (pehle se hai to wahi, warna nayi ban jaati hai) taaki
-// history, status aur "ek business ko ek hi baar" wala rule yahan bhi lage.
+// history aur status yahan bhi lage. Same website kai baar likho to har line alag slot hai —
+// contact page ka message har line ke liye alag milta hai (testing ke liye); email fir bhi ek hi jaata hai.
 export async function loadFromList(kind: TemplateKind, text: string): Promise<LoadResult> {
   try {
     await requireAuth()
@@ -99,7 +100,6 @@ export async function loadFromList(kind: TemplateKind, text: string): Promise<Lo
     if (lines.length > config.batchSize)
       return { targets: [], error: `Ek click me max ${config.batchSize} lines — abhi ${lines.length} hain` }
 
-    const seen = new Set<string>()
     const targets: LoadedTarget[] = []
     for (const line of lines) {
       const parsed = parseTargetLine(line)
@@ -107,13 +107,7 @@ export async function loadFromList(kind: TemplateKind, text: string): Promise<Lo
         targets.push({ input: line, lead: null, note: 'Email ya website samajh nahi aayi' })
         continue
       }
-      const lead = await findOrCreateLead(parsed)
-      if (seen.has(lead.id)) {
-        targets.push({ input: line, lead, duplicate: true, note: 'Duplicate — yeh business list me upar aa chuka, ise ek hi message jaayega' })
-        continue
-      }
-      seen.add(lead.id)
-      targets.push({ input: line, lead })
+      targets.push({ input: line, lead: await findOrCreateLead(parsed) })
     }
     revalidatePath('/leads')
     return { targets: withNotes(targets, kind) }
@@ -174,13 +168,15 @@ async function findLead(p: ParsedTarget): Promise<Lead | null> {
 // - 'email': jinka email hai unhe aapki SMTP se automatic email
 // - 'contact_form': jinka contact page hai unke message ready (aap paste-submit karke "Sent" dabate ho)
 // - 'both': har business ko jo bhi channel available hai — email automatic + contact page ready
-// Har business ko har channel par ek round me sirf ek hi message jaata hai.
+// leadIds = load ki hui lines ke hisaab se (same business kai baar ho sakta hai): email har business ko
+// ek hi baar, contact page ka message har line (slot) ke liye alag.
 export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: string[]): Promise<BatchResult> {
   try {
     await requireAuth()
     if (!SEND_MODES.includes(mode)) return emptyResult('email', 'Invalid mode')
 
-    const ids = [...new Set((leadIds ?? []).map(String))].slice(0, config.batchSize)
+    const slots = (leadIds ?? []).map(String).slice(0, config.batchSize)
+    const ids = [...new Set(slots)]
     if (ids.length === 0) return emptyResult(mode, 'Pehle businesses load karo')
 
     const templates = await getTemplates()
@@ -198,7 +194,7 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
     let emailSlots = mode === 'contact_form' ? 0 : Math.max(0, config.dailyLimit - (await emailsSentLast24h()))
 
     const me = getMe()
-    const assisted = new Map<string, AssistedLead>()
+    const formReady = new Map<string, boolean>() // lead id -> contact page card banana hai, email bhi gaya?
 
     await mapLimit(leads, EMAIL_CONCURRENCY, async (lead) => {
       const skip = (reason: string) => {
@@ -243,18 +239,21 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
         }
       }
 
-      if (useForm) {
-        assisted.set(lead.id, {
-          lead,
-          subject: renderTemplate(template.subject, lead, me),
-          body: renderTemplate(template.body, lead, me),
-          emailed,
-        })
-      }
+      if (useForm) formReady.set(lead.id, emailed)
     })
 
-    // Parallel sending se order bigadta hai — cards load kiye hue order me dikhao
-    result.assisted = leads.flatMap((l) => assisted.get(l.id) ?? [])
+    // Har line (slot) ka apna card, load kiye hue order me
+    result.assisted = slots.flatMap((id, slot) => {
+      const lead = byId.get(id)
+      if (!lead || !formReady.has(id)) return []
+      return [{
+        slot,
+        lead,
+        subject: renderTemplate(template.subject, lead, me),
+        body: renderTemplate(template.body, lead, me),
+        emailed: formReady.get(id)!,
+      }]
+    })
 
     revalidatePath('/leads')
     revalidatePath('/queue')
@@ -284,9 +283,10 @@ export async function markContactFormSent(
       const claimed = await claimLead(lead, kind)
       if (!claimed) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
     } else {
-      // "Dono" mode: isi round me email ja chuka (lead claimed hai) — sirf contact form ka record chahiye
+      // Isi round me lead claim ho chuka (email gaya, ya same website ki pichhli line ka contact form) —
+      // dobara claim nahi (follow-up count do baar na badhe), sirf is submission ka record chahiye
       const sent = await channelsSentThisRound(lead, kind)
-      if (!sent.has('email') || sent.has('contact_form')) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
+      if (sent.size === 0) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
     }
 
     await logOutreach(lead, 'contact_form', kind, subject, body, true)
