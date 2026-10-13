@@ -3,12 +3,14 @@
 import { revalidatePath } from 'next/cache'
 import { requireAuth } from '@/lib/auth'
 import { config, getMe } from '@/lib/config'
-import { claimLead, emailsSentLast24h, getCandidates, getTemplates, releaseLead } from '@/lib/data'
+import { channelsSentThisRound, claimLead, emailsSentLast24h, getCandidates, getTemplates, ineligibleReason, releaseLead } from '@/lib/data'
 import { sendMail } from '@/lib/mailer'
 import { mapLimit } from '@/lib/pool'
 import { db } from '@/lib/supabase'
 import { renderEmailBody, renderTemplate } from '@/lib/template'
-import type { Channel, Lead, TemplateKind } from '@/lib/types'
+import type { Channel, Lead, SendMode, TemplateKind } from '@/lib/types'
+
+const SEND_MODES: SendMode[] = ['email', 'contact_form', 'both']
 
 const EMAIL_CONCURRENCY = 5 // ek saath itne emails; baaki queue me wait karte hain
 
@@ -34,60 +36,109 @@ async function logOutreach(
     .insert({ lead_id: lead.id, channel, kind, subject, body, ok, error: error ?? null })
 }
 
+export type AssistedLead = {
+  lead: Lead
+  subject: string
+  body: string
+  emailed: boolean // "Dono" mode me is business ko email bhi chala gaya
+}
+
 export type BatchResult = {
+  mode: SendMode
   sent: number
   failed: number
   skipped: number
   details: { business_name: string; ok: boolean; reason?: string }[]
+  assisted: AssistedLead[] // contact-page wale businesses, message ready
   error?: string // poora batch hi start nahi ho paya (config/DB down waghairah)
 }
 
-// EMAIL batch: 1 click = automatic send, aapke apne SMTP account se — count tak parallel
-export async function sendEmailBatch(kind: TemplateKind, count?: number): Promise<BatchResult> {
+function emptyResult(mode: SendMode, error?: string): BatchResult {
+  return { mode, sent: 0, failed: 0, skipped: 0, details: [], assisted: [], error }
+}
+
+// 1 click = count tak ALAG-ALAG businesses. mode decide karta hai kya jaata hai:
+// - 'email': jinka email hai unhe aapki SMTP se automatic email
+// - 'contact_form': jinka contact page hai unke message ready (aap paste-submit karke "Sent" dabate ho)
+// - 'both': har business ko jo bhi channel available hai — email automatic + contact page ready
+// Har business ko har channel par ek round me sirf ek hi message jaata hai.
+export async function runBatch(mode: SendMode, kind: TemplateKind, count?: number): Promise<BatchResult> {
   try {
     await requireAuth()
+    if (!SEND_MODES.includes(mode)) return emptyResult('email', 'Invalid mode')
 
     const templates = await getTemplates()
     const template = templates.find((t) => t.kind === kind)
-    if (!template) return { sent: 0, failed: 0, skipped: 0, details: [], error: 'Template nahi mila — pehle /templates par save karein' }
+    if (!template) return emptyResult(mode, 'Template nahi mila — pehle /templates par save karein')
 
-    const already = await emailsSentLast24h()
-    const room = Math.max(0, config.dailyLimit - already)
-    const limit = Math.min(clampCount(count), room)
+    const result = emptyResult(mode)
+    const wanted = clampCount(count)
 
-    const result: BatchResult = { sent: 0, failed: 0, skipped: 0, details: [] }
-    if (limit <= 0) {
-      result.details.push({ business_name: '-', ok: false, reason: `Aaj ka limit (${config.dailyLimit}) poora ho gaya, kal try karein` })
-      return result
+    // Roz ka email safety limit; contact page manual hai isliye us par limit nahi
+    let emailSlots = 0
+    if (mode !== 'contact_form') {
+      emailSlots = Math.max(0, config.dailyLimit - (await emailsSentLast24h()))
+      if (mode === 'email' && emailSlots <= 0) {
+        result.details.push({ business_name: '-', ok: false, reason: `Aaj ka email limit (${config.dailyLimit}) poora ho gaya, kal try karein` })
+        return result
+      }
     }
 
     const me = getMe()
-    const candidates = await getCandidates('email', kind, limit)
+    const candidates = await getCandidates(mode, kind, mode === 'email' ? Math.min(wanted, emailSlots) : wanted)
+    const assisted = new Map<string, AssistedLead>()
 
     await mapLimit(candidates, EMAIL_CONCURRENCY, async (lead) => {
-      const claimed = await claimLead(lead, kind)
-      if (!claimed) {
+      // Slot await se pehle le lete hain taaki parallel workers limit cross na karein
+      const useEmail = mode !== 'contact_form' && !!lead.email && emailSlots > 0
+      if (useEmail) emailSlots--
+      const useForm = mode !== 'email' && !!lead.contact_url
+
+      if (!useEmail && !useForm) {
         result.skipped++
-        result.details.push({ business_name: lead.business_name, ok: false, reason: 'Kisi aur tab/click ne already claim kar liya' })
+        result.details.push({ business_name: lead.business_name, ok: false, reason: `Aaj ka email limit (${config.dailyLimit}) poora` })
         return
       }
 
-      const subject = renderTemplate(template.subject, lead, me)
-      const body = renderEmailBody(template.body, lead, me)
-      try {
-        await sendMail(lead.email!, subject, body)
-        await logOutreach(lead, 'email', kind, subject, body, true)
-        result.sent++
-        result.details.push({ business_name: lead.business_name, ok: true })
-      } catch (err) {
-        // Fail hua to status wapas rollback, agli baar retry ho sake
-        await releaseLead(lead)
-        const message = err instanceof Error ? err.message : 'Unknown error'
-        await logOutreach(lead, 'email', kind, subject, body, false, message)
-        result.failed++
-        result.details.push({ business_name: lead.business_name, ok: false, reason: message })
+      let emailed = false
+      if (useEmail) {
+        const claimed = await claimLead(lead, kind)
+        if (!claimed) {
+          result.skipped++
+          result.details.push({ business_name: lead.business_name, ok: false, reason: 'Kisi aur tab/click ne already claim kar liya' })
+          return
+        }
+
+        const subject = renderTemplate(template.subject, lead, me)
+        const body = renderEmailBody(template.body, lead, me)
+        try {
+          await sendMail(lead.email!, subject, body)
+          await logOutreach(lead, 'email', kind, subject, body, true)
+          emailed = true
+          result.sent++
+          result.details.push({ business_name: lead.business_name, ok: true })
+        } catch (err) {
+          // Fail hua to status wapas rollback, agli baar retry ho sake
+          await releaseLead(lead)
+          const message = err instanceof Error ? err.message : 'Unknown error'
+          await logOutreach(lead, 'email', kind, subject, body, false, message)
+          result.failed++
+          result.details.push({ business_name: lead.business_name, ok: false, reason: message })
+        }
+      }
+
+      if (useForm) {
+        assisted.set(lead.id, {
+          lead,
+          subject: renderTemplate(template.subject, lead, me),
+          body: renderTemplate(template.body, lead, me),
+          emailed,
+        })
       }
     })
+
+    // Parallel sending se order bigadta hai — cards leads ke original order me dikhao
+    result.assisted = candidates.flatMap((l) => assisted.get(l.id) ?? [])
 
     revalidatePath('/leads')
     revalidatePath('/queue')
@@ -95,34 +146,7 @@ export async function sendEmailBatch(kind: TemplateKind, count?: number): Promis
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Kuch galat ho gaya'
-    return { sent: 0, failed: 0, skipped: 0, details: [], error: message }
-  }
-}
-
-export type AssistedLead = { lead: Lead; subject: string; body: string }
-export type AssistedBatch = { items: AssistedLead[]; error?: string }
-
-// CONTACT-FORM batch: 1 click = count tak businesses load, aap khud har site par
-// jaakar paste+submit karte ho (real login/session us website ka use hota hai, aapka).
-export async function loadContactFormBatch(kind: TemplateKind, count?: number): Promise<AssistedBatch> {
-  try {
-    await requireAuth()
-    const templates = await getTemplates()
-    const template = templates.find((t) => t.kind === kind)
-    if (!template) return { items: [], error: 'Template nahi mila — pehle /templates par save karein' }
-
-    const me = getMe()
-    const candidates = await getCandidates('contact_form', kind, clampCount(count))
-    return {
-      items: candidates.map((lead) => ({
-        lead,
-        subject: renderTemplate(template.subject, lead, me),
-        body: renderTemplate(template.body, lead, me),
-      })),
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Kuch galat ho gaya'
-    return { items: [], error: message }
+    return emptyResult(mode, message)
   }
 }
 
@@ -138,8 +162,17 @@ export async function markContactFormSent(
     const { data, error } = await db().from('leads').select('*').eq('id', leadId).single()
     if (error || !data) return { ok: false, error: error?.message ?? 'Lead nahi mila' }
     const lead = data as Lead
-    const claimed = await claimLead(lead, kind)
-    if (!claimed) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
+
+    if (ineligibleReason(lead, kind) === null) {
+      // Is round me abhi tak kuch nahi gaya -> normal claim
+      const claimed = await claimLead(lead, kind)
+      if (!claimed) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
+    } else {
+      // "Dono" mode: isi round me email ja chuka (lead claimed hai) — sirf contact form ka record chahiye
+      const sent = await channelsSentThisRound(lead, kind)
+      if (!sent.has('email') || sent.has('contact_form')) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
+    }
+
     await logOutreach(lead, 'contact_form', kind, subject, body, true)
     revalidatePath('/leads')
     revalidatePath('/queue')

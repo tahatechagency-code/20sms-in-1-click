@@ -1,7 +1,7 @@
 import 'server-only'
 import { config } from './config'
 import { db } from './supabase'
-import { STATUSES, type Channel, type Lead, type LeadStatus, type OutreachLogEntry, type Template, type TemplateKind } from './types'
+import { STATUSES, type Channel, type Lead, type LeadStatus, type OutreachLogEntry, type SendMode, type Template, type TemplateKind } from './types'
 
 export async function getAllLeads(): Promise<Lead[]> {
   const { data, error } = await db().from('leads').select('*').order('created_at', { ascending: false })
@@ -22,9 +22,12 @@ function followupCutoff(): string {
 // Batch ke liye leads: har business ko pehla message sirf ek baar, follow-up limit ke andar
 // (Supabase-js ke chained builder types deeply generic hain isliye yahan `any` se chain karte hain;
 //  result Lead[] me cast hota hai, so runtime shape wahi controlled rehta hai.)
-export async function getCandidates(channel: Channel, kind: TemplateKind, limit: number): Promise<Lead[]> {
+// mode: 'email' = jinka email hai, 'contact_form' = jinka contact page hai, 'both' = dono me se koi bhi ho
+export async function getCandidates(mode: SendMode, kind: TemplateKind, limit: number): Promise<Lead[]> {
   let query: any = db().from('leads').select('*') // eslint-disable-line @typescript-eslint/no-explicit-any
-  query = channel === 'email' ? query.not('email', 'is', null) : query.is('email', null).not('contact_url', 'is', null)
+  if (mode === 'email') query = query.not('email', 'is', null)
+  else if (mode === 'contact_form') query = query.not('contact_url', 'is', null)
+  else query = query.or('email.not.is.null,contact_url.not.is.null')
   query =
     kind === 'first'
       ? query.eq('status', 'new')
@@ -101,6 +104,24 @@ export async function getOutreachLog(limit = 200): Promise<OutreachLogEntry[]> {
     ...row,
     lead: Array.isArray(row.lead) ? row.lead[0] : row.lead,
   })) as OutreachLogEntry[]
+}
+
+// Is round (pehla message / follow-up) me lead ko kin channels se already successfully message gaya.
+// "Dono" mode me email bhejte waqt lead claim ho jaata hai — baad me contact form "Sent" mark karne par
+// dobara claim nahi karna (follow-up count do baar na badhe), sirf log likhna hai.
+// Thoda slack: last_contacted_at Node ki ghadi se aur log ka created_at DB ki ghadi se aata hai.
+export async function channelsSentThisRound(lead: Lead, kind: TemplateKind): Promise<Set<Channel>> {
+  if (!lead.last_contacted_at) return new Set()
+  const since = new Date(new Date(lead.last_contacted_at).getTime() - 10 * 60_000).toISOString()
+  const { data, error } = await db()
+    .from('outreach_log')
+    .select('channel')
+    .eq('lead_id', lead.id)
+    .eq('kind', kind)
+    .eq('ok', true)
+    .gte('created_at', since)
+  if (error) throw new Error(error.message)
+  return new Set((data ?? []).map((r: { channel: Channel }) => r.channel))
 }
 
 export async function releaseLead(lead: Lead): Promise<void> {

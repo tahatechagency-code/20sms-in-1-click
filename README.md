@@ -9,12 +9,16 @@ kisi ek website ko baar-baar spam nahi.
 - **Leads:** business ka naam, website, email ya contact-page link, status (new → contacted → replied → won)
 - **Templates:** ek "pehla message" aur ek "follow-up" template, `{business_name}`, `{website}`,
   `{contact_person}`, `{my_name}`, `{my_portfolio}` placeholders ke saath
-- **Send Batch (1 click):**
-  - **Email leads:** poora automatic — aapki SMTP se seedha bhej deta hai, ek baar me 20 tak
+- **Send Batch (1 click) — 3 mode, aap chuno:**
+  - **Sirf Email:** jin leads ka email hai unhe aapki SMTP se poora automatic email, ek click me 20 tak
     (env se configurable), roz ka safety limit bhi hai
-  - **Contact-form leads:** assisted — 20 businesses load karta hai, har ek ka message ready
-    milta hai; aap khud contact page kholke apne login/session se paste-submit karte ho, phir
-    "Sent" mark kar dete ho. Isse har website ka apna real, manual submission hota hai
+  - **Sirf Contact page:** jin leads ka contact-page link hai, 20 businesses load hote hain, har ek ka
+    message ready milta hai; aap khud contact page kholke apne login/session se paste-submit karte ho,
+    phir "Sent" mark kar dete ho. Isse har website ka apna real, manual submission hota hai
+  - **Dono:** ek click me 20 businesses — jinka email hai unhe email automatic chala jaata hai, aur jinka
+    contact page hai unka message bhi ready (jis business ke paas dono hain, use dono milte hain)
+  - Har mode me 20 messages = **20 alag-alag businesses**, ek business ko har channel par ek round me
+    sirf ek message
 - **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
   configurable din baad, aur ek limited baar
 - **Kitne bhejne hai, aap chuno:** Send Batch page par ek number input hai (1 se `BATCH_SIZE` tak) —

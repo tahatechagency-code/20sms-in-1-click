@@ -10,6 +10,14 @@ export const STATUSES = [
 export type LeadStatus = (typeof STATUSES)[number]
 export type TemplateKind = 'first' | 'followup'
 export type Channel = 'email' | 'contact_form'
+// Send Batch par aap chunte ho: sirf email, sirf contact page, ya dono ek saath
+export type SendMode = Channel | 'both'
+
+export const SEND_MODE_LABELS: Record<SendMode, string> = {
+  email: 'Sirf Email',
+  contact_form: 'Sirf Contact page',
+  both: 'Dono (Email + Contact page)',
+}
 
 export type Lead = {
   id: string
