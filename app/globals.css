@@ -114,3 +114,14 @@ tr:last-child td { border-bottom: none; }
 .leadcard .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .pill { font-size: 12px; color: var(--muted); }
+
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.mode {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 2px; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 0;
+  background: var(--panel-2); cursor: pointer;
+}
+.mode.active { border-color: var(--accent); }
+.mode input { width: auto; margin: 0; }
+.mode .t { color: var(--text); font-weight: 500; }
+.mode .d { grid-column: 2; font-size: 12px; }
