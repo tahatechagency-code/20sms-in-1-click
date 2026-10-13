@@ -1,4 +1,4 @@
--- Supabase SQL Editor me yeh poori file ek baar run karein.
+-- Supabase SQL Editor me yeh poori file run karein (dobara run karna bhi safe hai).
 
 create extension if not exists pgcrypto;
 
@@ -17,9 +17,13 @@ create table if not exists leads (
   created_at timestamptz not null default now()
 );
 
--- Ek business ko do baar add hone se rokta hai
-create unique index if not exists leads_email_key on leads (lower(email)) where email is not null;
-create unique index if not exists leads_website_key on leads (lower(website)) where website is not null;
+-- Same email/website baar-baar add ho sakti hai, isliye UNIQUE index nahi hai.
+-- (Purane setup me UNIQUE index tha jo duplicate add rokta tha — yeh line use hata deti hai,
+--  isliye yeh poori file dobara run karna safe hai.)
+drop index if exists leads_email_key;
+drop index if exists leads_website_key;
+create index if not exists leads_email_idx on leads (lower(email));
+create index if not exists leads_website_idx on leads (lower(website));
 create index if not exists leads_status_idx on leads (status, created_at);
 
 create table if not exists templates (

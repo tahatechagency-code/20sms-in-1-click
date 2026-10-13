@@ -6,8 +6,14 @@ import { normalizeEmail, normalizeUrl, normalizeWebsite } from '@/lib/normalize'
 import { db } from '@/lib/supabase'
 import type { LeadStatus } from '@/lib/types'
 import { STATUSES } from '@/lib/types'
+import { sendEmailToLead } from './queue'
 
-export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
+// warn: kaam hua lekin kuch adhoora (jaise lead add hui par email nahi gayi)
+export type ActionResult = { ok: true; message?: string; warn?: boolean } | { ok: false; error: string }
+
+// Purane database me email/website par UNIQUE index hai — wahi duplicate add rokta hai
+const DUPLICATE_HELP =
+  'Database abhi bhi same email/website dobara add nahi hone de raha (purana UNIQUE index). Supabase → SQL Editor me `supabase/allow-duplicates.sql` (ya poori `supabase/schema.sql`) ek baar run karein, phir dobara add karein.'
 
 export async function addLead(formData: FormData): Promise<ActionResult> {
   await requireAuth()
@@ -23,19 +29,35 @@ export async function addLead(formData: FormData): Promise<ActionResult> {
 
   if (!email && !contactUrl) return { ok: false, error: 'Email ya contact page link me se kam se kam ek do' }
 
-  const { error } = await db().from('leads').insert({
-    business_name: businessName,
-    website,
-    email,
-    contact_url: contactUrl,
-    contact_person: contactPerson,
-    notes,
-  })
+  const rawEmail = String(formData.get('email') ?? '').trim()
+  if (rawEmail && !email) return { ok: false, error: `"${rawEmail}" sahi email address nahi hai` }
+
+  const { data, error } = await db()
+    .from('leads')
+    .insert({
+      business_name: businessName,
+      website,
+      email,
+      contact_url: contactUrl,
+      contact_person: contactPerson,
+      notes,
+    })
+    .select('id')
+    .single()
   if (error) {
-    if (error.code === '23505') return { ok: false, error: 'Yeh business (email/website) pehle se list me hai' }
+    if (error.code === '23505') return { ok: false, error: DUPLICATE_HELP }
     return { ok: false, error: error.message }
   }
   revalidatePath('/leads')
+  revalidatePath('/queue')
+
+  // "Add karte hi email bhejo" tick kiya ho to turant bhej do
+  if (email && formData.get('send_now')) {
+    const sent = await sendEmailToLead(data.id)
+    return sent.ok
+      ? { ok: true, message: `${businessName} add ho gaya aur email chali gayi (${email})` }
+      : { ok: true, warn: true, message: `${businessName} add ho gaya, lekin email nahi gayi: ${sent.error}` }
+  }
   return { ok: true, message: `${businessName} add ho gaya` }
 }
 
@@ -63,14 +85,20 @@ export async function importLeadsCsv(formData: FormData): Promise<ActionResult> 
 
   if (parsed.length === 0) return { ok: false, error: 'Koi valid row nahi mili (business_name + email ya contact_url chahiye)' }
 
-  const { error, count } = await db().from('leads').upsert(parsed, {
-    onConflict: 'email',
-    ignoreDuplicates: true,
-    count: 'exact',
-  })
-  if (error) return { ok: false, error: error.message }
+  // Plain insert: same email/website wali rows bhi add hoti hain (pehle yahan upsert tha jo
+  // matching unique constraint na hone se har baar fail ho jaata tha)
+  const { error, count } = await db().from('leads').insert(parsed, { count: 'exact' })
+  if (error) {
+    if (error.code === '23505') return { ok: false, error: DUPLICATE_HELP }
+    return { ok: false, error: error.message }
+  }
   revalidatePath('/leads')
-  return { ok: true, message: `${count ?? parsed.length} leads import hue (duplicates skip ho gaye)` }
+  revalidatePath('/queue')
+  const skipped = rows.length - parsed.length
+  return {
+    ok: true,
+    message: `${count ?? parsed.length} leads import hue${skipped ? ` (${skipped} rows me business_name ya email/contact_url nahi tha, skip hui)` : ''}`,
+  }
 }
 
 export async function setLeadStatus(id: string, status: LeadStatus): Promise<ActionResult> {
@@ -88,5 +116,6 @@ export async function deleteLead(id: string): Promise<ActionResult> {
   const { error } = await db().from('leads').delete().eq('id', id)
   if (error) return { ok: false, error: error.message }
   revalidatePath('/leads')
+  revalidatePath('/queue')
   return { ok: true }
 }

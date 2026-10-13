@@ -6,6 +6,7 @@ import {
   loadContactFormBatch,
   markContactFormSent,
   sendEmailBatch,
+  sendSmtpTest,
   type AssistedLead,
   type BatchResult,
 } from '../actions/queue'
@@ -30,6 +31,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
   const [assistedError, setAssistedError] = useState<string | null>(null)
   const [sentIds, setSentIds] = useState<Set<string>>(new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [smtpMsg, setSmtpMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   // count ko hamesha 1..batchSize ke beech rakhte hain, khali box se bhi crash na ho
   function updateCount(raw: string) {
@@ -48,6 +50,18 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         router.refresh()
       } catch (err) {
         setEmailError(err instanceof Error ? err.message : 'Kuch galat ho gaya, dobara try karein')
+      }
+    })
+  }
+
+  function runSmtpTest() {
+    setSmtpMsg(null)
+    startTransition(async () => {
+      try {
+        const res = await sendSmtpTest()
+        setSmtpMsg(res.ok ? { ok: true, text: res.message ?? 'SMTP sahi hai' } : { ok: false, text: res.error ?? 'SMTP test fail' })
+      } catch (err) {
+        setSmtpMsg({ ok: false, text: err instanceof Error ? err.message : 'SMTP test fail' })
       }
     })
   }
@@ -95,7 +109,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
   return (
     <div>
       <h1>Send Batch</h1>
-      <p className="sub">Har click par aapke chune hue count jitne alag-alag businesses ko message jaata hai — ek hi website ko baar-baar nahi.</p>
+      <p className="sub">Har click par aapke chune hue count jitne &quot;New&quot; leads ko message jaata hai. Kisi ko dobara bhejna ho to Leads page par &quot;Dobara bhejo&quot; dabayein.</p>
 
       <div className="stats">
         {(Object.keys(counts) as LeadStatus[]).map((s) => (
@@ -137,7 +151,11 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         <button className="btn" onClick={runEmailBatch} disabled={pending}>
           {pending ? 'Bhej raha hoon…' : `${count} websites ko batch bhejo`}
         </button>
+        <button className="btn secondary" style={{ marginLeft: 8 }} onClick={runSmtpTest} disabled={pending}>
+          SMTP test (khud ko email)
+        </button>
 
+        {smtpMsg && <div className={`msg ${smtpMsg.ok ? 'ok' : 'error'}`} style={{ marginTop: 12 }}>{smtpMsg.text}</div>}
         {emailError && <div className="msg error" style={{ marginTop: 12 }}>{emailError}</div>}
 
         {emailResult && !emailResult.error && (

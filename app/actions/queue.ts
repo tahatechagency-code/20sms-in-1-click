@@ -3,8 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { requireAuth } from '@/lib/auth'
 import { config, getMe } from '@/lib/config'
-import { claimLead, emailsSentLast24h, getCandidates, getTemplates, releaseLead } from '@/lib/data'
-import { sendMail } from '@/lib/mailer'
+import { claimLead, emailsSentLast24h, getCandidates, getLead, getTemplate, markLeadSent, releaseLead } from '@/lib/data'
+import { sendMail, sendTestMail } from '@/lib/mailer'
 import { mapLimit } from '@/lib/pool'
 import { db } from '@/lib/supabase'
 import { renderEmailBody, renderTemplate } from '@/lib/template'
@@ -29,9 +29,10 @@ async function logOutreach(
   ok: boolean,
   error?: string,
 ) {
-  await db()
+  const { error: dbError } = await db()
     .from('outreach_log')
     .insert({ lead_id: lead.id, channel, kind, subject, body, ok, error: error ?? null })
+  if (dbError) throw new Error(dbError.message)
 }
 
 export type BatchResult = {
@@ -47,9 +48,7 @@ export async function sendEmailBatch(kind: TemplateKind, count?: number): Promis
   try {
     await requireAuth()
 
-    const templates = await getTemplates()
-    const template = templates.find((t) => t.kind === kind)
-    if (!template) return { sent: 0, failed: 0, skipped: 0, details: [], error: 'Template nahi mila — pehle /templates par save karein' }
+    const template = await getTemplate(kind)
 
     const already = await emailsSentLast24h()
     const room = Math.max(0, config.dailyLimit - already)
@@ -63,6 +62,17 @@ export async function sendEmailBatch(kind: TemplateKind, count?: number): Promis
 
     const me = getMe()
     const candidates = await getCandidates('email', kind, limit)
+    if (candidates.length === 0) {
+      result.details.push({
+        business_name: '-',
+        ok: false,
+        reason:
+          kind === 'first'
+            ? 'Koi "New" status wala email lead nahi bacha. Leads page par naya email add karein, ya kisi lead ka status "New" karein, ya us lead par "Email bhejo" dabakar dobara bhejein.'
+            : `Abhi koi follow-up ready nahi (status "Contacted" + ${config.followupDays} din purana chahiye). Leads page se "Email bhejo" dabakar turant bhej sakte hain.`,
+      })
+      return result
+    }
 
     await mapLimit(candidates, EMAIL_CONCURRENCY, async (lead) => {
       const claimed = await claimLead(lead, kind)
@@ -76,17 +86,19 @@ export async function sendEmailBatch(kind: TemplateKind, count?: number): Promis
       const body = renderEmailBody(template.body, lead, me)
       try {
         await sendMail(lead.email!, subject, body)
-        await logOutreach(lead, 'email', kind, subject, body, true)
-        result.sent++
-        result.details.push({ business_name: lead.business_name, ok: true })
       } catch (err) {
         // Fail hua to status wapas rollback, agli baar retry ho sake
-        await releaseLead(lead)
+        await releaseLead(lead).catch(() => {})
         const message = err instanceof Error ? err.message : 'Unknown error'
-        await logOutreach(lead, 'email', kind, subject, body, false, message)
+        await logOutreach(lead, 'email', kind, subject, body, false, message).catch(() => {})
         result.failed++
         result.details.push({ business_name: lead.business_name, ok: false, reason: message })
+        return
       }
+      // Email chali gayi — log fail ho jaye to bhi "sent" hi dikhana hai (warna dobara bhej dete)
+      await logOutreach(lead, 'email', kind, subject, body, true).catch(() => {})
+      result.sent++
+      result.details.push({ business_name: lead.business_name, ok: true })
     })
 
     revalidatePath('/leads')
@@ -107,9 +119,7 @@ export type AssistedBatch = { items: AssistedLead[]; error?: string }
 export async function loadContactFormBatch(kind: TemplateKind, count?: number): Promise<AssistedBatch> {
   try {
     await requireAuth()
-    const templates = await getTemplates()
-    const template = templates.find((t) => t.kind === kind)
-    if (!template) return { items: [], error: 'Template nahi mila — pehle /templates par save karein' }
+    const template = await getTemplate(kind)
 
     const me = getMe()
     const candidates = await getCandidates('contact_form', kind, clampCount(count))
@@ -135,16 +145,67 @@ export async function markContactFormSent(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     await requireAuth()
-    const { data, error } = await db().from('leads').select('*').eq('id', leadId).single()
-    if (error || !data) return { ok: false, error: error?.message ?? 'Lead nahi mila' }
-    const lead = data as Lead
+    const lead = await getLead(leadId)
     const claimed = await claimLead(lead, kind)
     if (!claimed) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
-    await logOutreach(lead, 'contact_form', kind, subject, body, true)
+    await logOutreach(lead, 'contact_form', kind, subject, body, true).catch(() => {})
     revalidatePath('/leads')
     revalidatePath('/queue')
     revalidatePath('/history')
     return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Kuch galat ho gaya' }
+  }
+}
+
+export type SendOneResult = { ok: boolean; message?: string; error?: string }
+
+// Ek lead ko abhi turant email — status kuch bhi ho (New/Contacted/Replied...), jitni baar chaho.
+// Pehli baar "Pehla message" template, uske baad "Follow-up" template jaata hai.
+export async function sendEmailToLead(leadId: string): Promise<SendOneResult> {
+  try {
+    await requireAuth()
+    const lead = await getLead(leadId)
+    if (!lead.email) return { ok: false, error: `${lead.business_name} ka email nahi hai — sirf contact page hai` }
+    if (lead.status === 'do_not_contact')
+      return { ok: false, error: `${lead.business_name} "Do not contact" par hai — pehle status badlein` }
+
+    const already = await emailsSentLast24h()
+    if (already >= config.dailyLimit)
+      return { ok: false, error: `Aaj ka limit (${config.dailyLimit}) poora ho gaya — env me DAILY_LIMIT badha sakte hain` }
+
+    const kind: TemplateKind = lead.status === 'new' ? 'first' : 'followup'
+    const template = await getTemplate(kind)
+    const me = getMe()
+    const subject = renderTemplate(template.subject, lead, me)
+    const body = renderEmailBody(template.body, lead, me)
+
+    try {
+      await sendMail(lead.email, subject, body)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      await logOutreach(lead, 'email', kind, subject, body, false, message).catch(() => {})
+      revalidatePath('/history')
+      return { ok: false, error: `${lead.business_name}: ${message}` }
+    }
+
+    await logOutreach(lead, 'email', kind, subject, body, true).catch(() => {})
+    await markLeadSent(lead, kind).catch(() => {})
+    revalidatePath('/leads')
+    revalidatePath('/queue')
+    revalidatePath('/history')
+    return { ok: true, message: `✓ ${lead.business_name} (${lead.email}) ko email chali gayi` }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Kuch galat ho gaya' }
+  }
+}
+
+// SMTP sahi set hai ya nahi — aapke apne address par test email
+export async function sendSmtpTest(): Promise<SendOneResult> {
+  try {
+    await requireAuth()
+    const to = await sendTestMail()
+    return { ok: true, message: `✓ SMTP sahi hai — test email ${to} par bhej di (inbox/spam check karein)` }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Kuch galat ho gaya' }
   }

@@ -1,6 +1,7 @@
 import 'server-only'
 import { config } from './config'
 import { db } from './supabase'
+import { DEFAULT_TEMPLATES } from './template'
 import { STATUSES, type Channel, type Lead, type LeadStatus, type OutreachLogEntry, type Template, type TemplateKind } from './types'
 
 export async function getAllLeads(): Promise<Lead[]> {
@@ -9,10 +10,48 @@ export async function getAllLeads(): Promise<Lead[]> {
   return data as Lead[]
 }
 
-export async function getTemplates(): Promise<Template[]> {
+async function fetchTemplates(): Promise<Template[]> {
   const { data, error } = await db().from('templates').select('*').order('created_at')
   if (error) throw new Error(error.message)
   return data as Template[]
+}
+
+// Koi template (first/followup) DB me na ho to default wala khud insert kar deta hai —
+// warna "Template nahi mila" aata aur ek bhi email nahi jaati
+export async function getTemplates(): Promise<Template[]> {
+  const templates = await fetchTemplates()
+  const missing = DEFAULT_TEMPLATES.filter((d) => !templates.some((t) => t.kind === d.kind))
+  if (missing.length === 0) return templates
+  const { error } = await db().from('templates').insert(missing)
+  if (error) throw new Error(error.message)
+  return fetchTemplates()
+}
+
+export async function getTemplate(kind: TemplateKind): Promise<Template> {
+  const template = (await getTemplates()).find((t) => t.kind === kind)
+  if (!template) throw new Error('Template nahi mila — /templates par save karein')
+  return template
+}
+
+export async function getLead(id: string): Promise<Lead> {
+  const { data, error } = await db().from('leads').select('*').eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) throw new Error('Lead nahi mila (shayad delete ho gaya)')
+  return data as Lead
+}
+
+// Ek lead ko manually (dobara) bhejne ke baad uska status/count update
+export async function markLeadSent(lead: Lead, kind: TemplateKind): Promise<void> {
+  const now = new Date().toISOString()
+  const { error } = await db()
+    .from('leads')
+    .update(
+      kind === 'first'
+        ? { status: 'contacted', last_contacted_at: now }
+        : { status: 'contacted', followups_sent: lead.followups_sent + 1, last_contacted_at: now },
+    )
+    .eq('id', lead.id)
+  if (error) throw new Error(error.message)
 }
 
 function followupCutoff(): string {

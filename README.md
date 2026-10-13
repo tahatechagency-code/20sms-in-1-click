@@ -1,8 +1,8 @@
 # Outreach Manager
 
 Personal AI-automation outreach tool. Ek jagah se apni leads (businesses) manage karo aur
-ek click me batch (default 20) ko outreach message bhejo — **hamesha alag-alag businesses ko**,
-kisi ek website ko baar-baar spam nahi.
+ek click me batch (default 20) ko outreach message bhejo, ya kisi bhi lead ko jitni baar chaho
+dobara email bhejo.
 
 ## Kya karta hai
 
@@ -15,8 +15,15 @@ kisi ek website ko baar-baar spam nahi.
   - **Contact-form leads:** assisted — 20 businesses load karta hai, har ek ka message ready
     milta hai; aap khud contact page kholke apne login/session se paste-submit karte ho, phir
     "Sent" mark kar dete ho. Isse har website ka apna real, manual submission hota hai
-- **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
+- **Same website/email baar-baar add:** koi duplicate block nahi — jitni baar chaho add karo
+  (form ya CSV dono se)
+- **Email bhejo / Dobara bhejo:** Leads page par har email lead ke saamne button — kisi ko bhi,
+  kabhi bhi, jitni baar chaho turant email (pehli baar "Pehla message", uske baad "Follow-up"
+  template). Add form me "Add karte hi email bhej do" tick karo to add hote hi chali jaati hai
+- **Batch safety:** batch button sirf "New" leads ko pehla message bhejta hai; follow-up sirf
   configurable din baad, aur ek limited baar
+- **SMTP test:** Send Batch page par "SMTP test" button — aapke apne address par test email bhejta
+  hai aur fail ho to saaf batata hai kyun (galat App Password, galat host/port, waghairah)
 - **Kitne bhejne hai, aap chuno:** Send Batch page par ek number input hai (1 se `BATCH_SIZE` tak) —
   aaj 10 chahiye to 10, kal 20 chahiye to 20, ek hi jagah se
 - **History page (`/history`):** batch ke har click ka poora record — kaun sa business/website,
@@ -76,6 +83,21 @@ ho jaati hai. Ab is case me app crash nahi hota — ek friendly error screen dik
 4. 20 emails ek saath bhejne me time lag sakta hai — `app/queue/page.tsx` me
    `maxDuration = 60` already set hai (Vercel Hobby plan ka max), aur emails 5 ke batch me
    parallel bhejte hain taaki timeout na ho
+
+### "Same email/website dobara add nahi ho rahi"
+
+Purane setup me database par email/website ka UNIQUE index tha. Supabase → SQL Editor me
+`supabase/allow-duplicates.sql` ek baar run karo (ya poori `supabase/schema.sql` dobara — woh safe hai).
+
+### "Email nahi ja rahi"
+
+1. Send Batch page par **SMTP test** dabao — exact wajah dikh jaayegi
+2. Gmail: normal password kaam nahi karta — 2-Step Verification on karke
+   [App Password](https://myaccount.google.com/apppasswords) banao, `SMTP_HOST=smtp.gmail.com`,
+   `SMTP_PORT=465`, `SMTP_USER` = wahi Gmail address
+3. Batch "0 sent" dikhaye to iska matlab koi "New" email lead nahi bacha — Leads page se
+   "Dobara bhejo" use karo ya naya lead add karo
+4. `/history` me har failed email ka reason likha hota hai
 
 ## Limits (env se badal sakte ho)
 
