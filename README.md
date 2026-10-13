@@ -9,20 +9,20 @@ kisi ek website ko baar-baar spam nahi.
 - **Leads:** business ka naam, website, email ya contact-page link, status (new → contacted → replied → won)
 - **Templates:** ek "pehla message" aur ek "follow-up" template, `{business_name}`, `{website}`,
   `{contact_person}`, `{my_name}`, `{my_portfolio}` placeholders ke saath
-- **Send Batch (1 click) — 3 mode, aap chuno:**
-  - **Sirf Email:** jin leads ka email hai unhe aapki SMTP se poora automatic email, ek click me 20 tak
-    (env se configurable), roz ka safety limit bhi hai
-  - **Sirf Contact page:** jin leads ka contact-page link hai, 20 businesses load hote hain, har ek ka
-    message ready milta hai; aap khud contact page kholke apne login/session se paste-submit karte ho,
-    phir "Sent" mark kar dete ho. Isse har website ka apna real, manual submission hota hai
-  - **Dono:** ek click me 20 businesses — jinka email hai unhe email automatic chala jaata hai, aur jinka
-    contact page hai unka message bhi ready (jis business ke paas dono hain, use dono milte hain)
-  - Har mode me 20 messages = **20 alag-alag businesses**, ek business ko har channel par ek round me
-    sirf ek message
+- **Send Batch — 2 step:**
+  1. **Load:** max 20 businesses load karo — ya to **apni list** paste karo (har line me ek email ya
+     website/contact-page URL, chahe to aage naam: `Gupta Bakery, guptabakery.in/contact`), ya
+     **leads list se agle N**. Apni list ki har line apne aap lead ban jaati hai (pehle se hai to wahi use hoti hai)
+  2. **Send (1 click)** — load kiye hue sab businesses ko, aap chuno:
+     - **Sirf Email:** jinka email hai unhe aapki SMTP se automatic email, roz ka safety limit bhi hai
+     - **Sirf Contact page:** jinka contact page hai unke message ready; aap khud contact page kholke
+       paste-submit karte ho, phir "Sent" mark karte ho (har website ka apna real, manual submission)
+     - **Dono:** email wale ko email automatic + contact page wale ka message ready
+  - List me ek hi business (same email/website) do baar ho to "Duplicate" dikhta hai aur use ek hi
+    message jaata hai — ek inbox/form par ek saath kai copies bhejna spam hai aur aapka SMTP account block karwa deta hai
 - **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
   configurable din baad, aur ek limited baar
-- **Kitne bhejne hai, aap chuno:** Send Batch page par ek number input hai (1 se `BATCH_SIZE` tak) —
-  aaj 10 chahiye to 10, kal 20 chahiye to 20, ek hi jagah se
+- **Kitne bhejne hai, aap chuno:** 1 se `BATCH_SIZE` tak — aaj 10 chahiye to 10, kal 20 chahiye to 20
 - **History page (`/history`):** batch ke har click ka poora record — kaun sa business/website,
   kab, kaunsa message, Sent ya Failed (fail hua to reason bhi)
 - Password-protected dashboard (sirf aapke liye — signup nahi hai)
