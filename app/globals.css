@@ -69,7 +69,7 @@ textarea { resize: vertical; }
 .row { display: flex; gap: 12px; flex-wrap: wrap; }
 .row > .field { flex: 1; min-width: 160px; }
 
-button.btn {
+.btn {
   background: var(--accent-2);
   color: #fff;
   border: none;
@@ -79,11 +79,11 @@ button.btn {
   font-weight: 500;
   cursor: pointer;
 }
-button.btn:hover { background: var(--accent); }
-button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-button.btn.secondary { background: var(--panel-2); border: 1px solid var(--border); }
-button.btn.danger { background: transparent; color: var(--err); border: 1px solid var(--err); }
-button.btn.small { padding: 5px 10px; font-size: 13px; }
+.btn:hover { background: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+.btn.danger { background: transparent; color: var(--err); border: 1px solid var(--err); }
+.btn.small { padding: 5px 10px; font-size: 13px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -125,3 +125,4 @@ tr:last-child td { border-bottom: none; }
 .mode input { width: auto; margin: 0; }
 .mode .t { color: var(--text); font-weight: 500; }
 .mode .d { grid-column: 2; font-size: 12px; }
+a.btn { display: inline-block; color: #fff; text-decoration: none; }
