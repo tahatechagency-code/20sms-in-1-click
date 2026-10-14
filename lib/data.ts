@@ -1,7 +1,7 @@
 import 'server-only'
 import { config } from './config'
 import { db } from './supabase'
-import { STATUSES, type Channel, type Lead, type LeadStatus, type OutreachLogEntry, type SendMode, type Template, type TemplateKind } from './types'
+import { STATUS_LABELS, STATUSES, type Lead, type LeadStatus, type OutreachLogEntry, type SendMode, type Template, type TemplateKind } from './types'
 
 export async function getAllLeads(): Promise<Lead[]> {
   const { data, error } = await db().from('leads').select('*').order('created_at', { ascending: false })
@@ -107,22 +107,11 @@ export async function getOutreachLog(limit = 200): Promise<OutreachLogEntry[]> {
   })) as OutreachLogEntry[]
 }
 
-// Is round (pehla message / follow-up) me lead ko kin channels se already successfully message gaya.
-// "Dono" mode me email bhejte waqt lead claim ho jaata hai — baad me contact form "Sent" mark karne par
-// dobara claim nahi karna (follow-up count do baar na badhe), sirf log likhna hai.
-// Thoda slack: last_contacted_at Node ki ghadi se aur log ka created_at DB ki ghadi se aata hai.
-export async function channelsSentThisRound(lead: Lead, kind: TemplateKind): Promise<Set<Channel>> {
-  if (!lead.last_contacted_at) return new Set()
-  const since = new Date(new Date(lead.last_contacted_at).getTime() - 10 * 60_000).toISOString()
-  const { data, error } = await db()
-    .from('outreach_log')
-    .select('channel')
-    .eq('lead_id', lead.id)
-    .eq('kind', kind)
-    .eq('ok', true)
-    .gte('created_at', since)
-  if (error) throw new Error(error.message)
-  return new Set((data ?? []).map((r: { channel: Channel }) => r.channel))
+// Jinhone khud mana kar diya unhe kisi bhi raste (email / form / WhatsApp / SMS) se message nahi
+export function optedOutReason(lead: Lead): string | null {
+  if (lead.status === 'do_not_contact' || lead.status === 'not_interested')
+    return `Status "${STATUS_LABELS[lead.status]}" hai — inhone mana kiya hai`
+  return null
 }
 
 export async function releaseLead(lead: Lead): Promise<void> {
