@@ -16,20 +16,27 @@ kisi ek website ko baar-baar spam nahi.
      - **Contact us page** (homepage ke links se, warna `/contact`, `/contact-us`…)
      - us par **contact form hai ya nahi** (normal `<form>` + WordPress CF7/WPForms, Google Forms, Typeform, HubSpot, Zoho…)
      - **WhatsApp number** (`wa.me` / WhatsApp links), **phone** (`tel:` links) aur **email**
-     Sab lead me save hota hai (7 din tak dobara check nahi hota). Table me har website ka result dikhta hai.
+     - **JavaScript wali sites** (React/Next.js/Wix… jinka saada HTML khaali hota hai): agar saade HTML me na form mile na
+       WhatsApp, to website **asli Chrome browser me khulti hai**, aur "WhatsApp" / "Email us" wale buttons dab ke dekhta hai
+       kaunsa link khulta hai (kuch submit/send nahi hota). Isme ~10 second/site lagte hain, Load ~45 second me ruk jaata hai —
+       jo sites reh jaayein wahan "dobara Load karo" likha aata hai.
+     Sab lead me save hota hai (jin sites par form ya WhatsApp mil gaya unhe 7 din tak dobara check nahi karta; jin par kuch nahi mila
+     unhe har Load par phir try karta hai). Table me har website ka faisla dikhta hai: **Contact form → WhatsApp → "Contact form / WhatsApp number
+     available nahi hai"**.
   2. **Send (1 click)** — load kiye hue sab businesses ko, aap chuno:
      - **Sirf Email:** jinka email hai (ya website par mila) unhe aapki SMTP se automatic email, roz ka safety limit bhi hai
      - **Sirf Contact page / WhatsApp:** har business ke liye best rasta khud chuna jaata hai —
        **form mila → Form** card ("Copy + Contact page kholo": message copy hoke page khulta hai, paste + submit),
        **form nahi → WhatsApp** card (chat message bhara hua khulta hai, bas Send),
-       **WhatsApp bhi nahi → SMS** card (phone par message bhara hua khulta hai). Bhejne ke baad "Sent" dabao
+       **WhatsApp bhi nahi → skip**, note: "Contact form / WhatsApp number available nahi hai". Bhejne ke baad "Sent" dabao.
+       (Batch SMS nahi bhejta — websites ke phone number aksar landline/toll-free hote hain. Leads page par SMS button hai)
      - **Dono:** email automatic + upar wala form/WhatsApp/SMS
   - **Same website kai baar (testing):** list me ek hi website jitni baar likhoge, utne alag message cards banenge
     (har line apna slot, har "Sent" history me alag record). Email fir bhi har business ko ek hi baar jaata hai
   - **Contacted ke baad bhi:** contact form / WhatsApp / SMS jitni baar chaho bhejo — website dobara load karo aur
     bhejo. Sirf **email** par purana rule hai (pehla message ek hi baar, follow-up `FOLLOWUP_DAYS` / `MAX_FOLLOWUPS`
     ke hisaab se). Status **"Not interested"** ya **"Do not contact"** ho to kisi bhi raste se kuch nahi jaata
-  - Form / WhatsApp / SMS ka aakhri "Send" aap khud dabate ho: bot se form submit karna ya WhatsApp/SMS automatic
+  - Form / WhatsApp ka aakhri "Send" aap khud dabate ho: bot se form submit karna ya WhatsApp automatic
     bhejna CAPTCHA me atakta hai, aur WhatsApp unknown numbers ko bulk message par number ban kar deta hai
 - **Email spam-proof:** ek business ko pehla email sirf ek baar jaata hai; follow-up email sirf
   configurable din baad, aur ek limited baar (form / WhatsApp / SMS par yeh limit nahi)
@@ -44,7 +51,8 @@ kisi ek website ko baar-baar spam nahi.
 ## Tech
 
 Next.js 16 (App Router, Server Actions) + Supabase (Postgres, service-role key sirf server par)
-+ Nodemailer (aapka apna SMTP/Gmail App Password). Koi paid AI API use nahi hoti.
++ Nodemailer (aapka apna SMTP/Gmail App Password) + `puppeteer-core` / `@sparticuz/chromium` (JavaScript wali
+websites ko asli browser me kholne ke liye; Vercel par apne aap, local par aapka Chrome/Edge). Koi paid AI API use nahi hoti.
 
 ## Setup
 
@@ -96,6 +104,11 @@ ho jaati hai. Ab is case me app crash nahi hota — ek friendly error screen dik
 4. 20 emails ek saath bhejne me time lag sakta hai — `app/queue/page.tsx` me
    `maxDuration = 60` already set hai (Vercel Hobby plan ka max), aur emails 5 ke batch me
    parallel bhejte hain taaki timeout na ho
+
+## Local par browser
+
+`npm run dev` par app aapke computer ka Chrome / Edge use karta hai (Windows/Mac/Linux ke aam paths khud dhundhta hai).
+Na mile to `.env.local` me `CHROME_PATH=` me chrome.exe ka poora path do. Vercel par kuch set karne ki zaroorat nahi.
 
 ## Limits (env se badal sakte ho)
 

@@ -10,7 +10,7 @@ import { normalizeEmail, normalizeUrl, normalizeWebsite } from '@/lib/normalize'
 import { db } from '@/lib/supabase'
 import { renderEmailBody, renderTemplate } from '@/lib/template'
 import { enrichLeads } from '@/lib/enrich'
-import { ASSISTED_CHANNELS, assistedChannel, type AssistedChannel, type Channel, type Lead, type SendMode, type TemplateKind } from '@/lib/types'
+import { ASSISTED_CHANNELS, assistedChannel, NOT_AVAILABLE, type AssistedChannel, type Channel, type Lead, type SendMode, type TemplateKind } from '@/lib/types'
 
 const SEND_MODES: SendMode[] = ['email', 'contact_form', 'both']
 
@@ -40,7 +40,7 @@ async function logOutreach(
 
 export type AssistedLead = {
   slot: number // load ki hui list me kaunsi line — same website kai baar ho to har line ka alag card
-  channel: AssistedChannel // form mila to contact_form, warna website par mila WhatsApp / phone
+  channel: AssistedChannel // form mila to contact_form, warna website par mila WhatsApp
   lead: Lead
   subject: string
   body: string
@@ -53,7 +53,7 @@ export type BatchResult = {
   failed: number
   skipped: number
   details: { business_name: string; ok: boolean; reason?: string }[]
-  assisted: AssistedLead[] // contact form / WhatsApp / SMS — message ready, aap 1 tap me bhejo
+  assisted: AssistedLead[] // contact form / WhatsApp — message ready, aap 1 tap me bhejo
   error?: string // poora batch hi start nahi ho paya (config/DB down waghairah)
 }
 
@@ -71,7 +71,7 @@ export type LoadedTarget = {
 
 export type LoadResult = { targets: LoadedTarget[]; error?: string }
 
-// Website khol ke contact page / form / WhatsApp / phone dhundho, phir har line par taaza lead + warning
+// Website khol ke (zaroorat ho to asli browser me) contact page / form / WhatsApp dhundho, phir har line par taaza lead + warning
 async function enrichAndNote(targets: LoadedTarget[], kind: TemplateKind): Promise<LoadedTarget[]> {
   const enriched = await enrichLeads(targets.flatMap((t) => t.lead ?? []))
   return targets.map((t) => {
@@ -81,9 +81,8 @@ async function enrichAndNote(targets: LoadedTarget[], kind: TemplateKind): Promi
     const note =
       t.note ??
       optedOutReason(lead) ??
-      (lead.email && ineligibleReason(lead, kind) ? 'Pehle contact ho chuka — email dobara nahi, form/WhatsApp/SMS jaayega' : undefined) ??
-      e.error ??
-      (lead.website && !assistedChannel(lead) && !lead.email ? 'Na contact form, na WhatsApp/phone, na email mila' : undefined)
+      (lead.email && ineligibleReason(lead, kind) ? 'Pehle contact ho chuka — email dobara nahi, form/WhatsApp jaayega' : undefined) ??
+      e.error
     return { ...t, lead, note }
   })
 }
@@ -184,11 +183,11 @@ async function findLead(p: ParsedTarget): Promise<Lead | null> {
 
 // mode decide karta hai kya jaata hai:
 // - 'email': jinka email hai unhe aapki SMTP se automatic email
-// - 'contact_form': contact form mila to uska message ready; form nahi to website par mila WhatsApp,
-//   woh bhi nahi to phone (SMS) — aap 1 tap me bhejte ho aur "Sent" dabate ho
-// - 'both': email automatic + upar wala contact form / WhatsApp / SMS message ready
+// - 'contact_form': contact form mila to uska message ready; form nahi to website par mila WhatsApp
+//   (message bhara hua khulta hai) — aap 1 tap me bhejte ho aur "Sent" dabate ho. Dono nahi to skip
+// - 'both': email automatic + upar wala contact form / WhatsApp message ready
 // leadIds = load ki hui lines ke hisaab se (same business kai baar ho sakta hai): email har business ko
-// ek hi baar, contact form / WhatsApp / SMS ka message har line (slot) ke liye alag.
+// ek hi baar, contact form / WhatsApp ka message har line (slot) ke liye alag.
 export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: string[]): Promise<BatchResult> {
   try {
     await requireAuth()
@@ -237,7 +236,7 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
       if (!useEmail && !useForm) {
         if (hasEmail) return skip(`Aaj ka email limit (${config.dailyLimit}) poora`)
         if (mode === 'email') return skip(emailBlocked ?? 'Is business ka email nahi hai')
-        return skip('Na contact form mila, na WhatsApp/phone number')
+        return skip(NOT_AVAILABLE)
       }
 
       let emailed = false

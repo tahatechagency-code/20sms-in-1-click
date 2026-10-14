@@ -1,6 +1,5 @@
 import 'server-only'
-import { lookup } from 'node:dns/promises'
-import { isIP } from 'node:net'
+import { assertPublicHost } from './netguard'
 
 // Website load hote hi: homepage padho -> "Contact us" page dhundho -> us par form hai ya nahi ->
 // email / phone / WhatsApp number nikaalo. Sirf public pages padhte hain, kuch submit nahi karte.
@@ -11,13 +10,14 @@ export type Discovery = {
   email: string | null
   phone: string | null // +<country><number>
   whatsapp: string | null // sirf digits, country code ke saath (wa.me format)
-  error?: string
+  error?: string // website hi nahi khuli
+  warning?: string // kuch mila, par browser wala check nahi ho paya
 }
 
 const PAGE_TIMEOUT_MS = 7000
 const MAX_HTML_BYTES = 1_500_000
 const MAX_REDIRECTS = 5
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
 
 // Jinke text/href me yeh ho woh contact page ho sakta hai (score jitna zyada, utna pakka)
 const CONTACT_HINTS: [RegExp, number][] = [
@@ -34,26 +34,57 @@ const FALLBACK_PATHS = ['/contact', '/contact-us', '/contactus', '/contact.html'
 // Form builders jo <form> ki jagah iframe/script se aate hain
 const EMBEDDED_FORM = /docs\.google\.com\/forms|forms\.gle|typeform\.com|jotform|hsforms|hubspot|wpforms|wpcf7|contact-form-7|formspree|tally\.so|zoho\.com\/forms|forms\.zohopublic|elementor-form|gform_wrapper|ninja-forms|fluentform|formidable|cognitoforms/i
 
-export async function discoverContact(siteUrl: string, defaultCountryCode: string): Promise<Discovery> {
-  const result: Discovery = { contactUrl: null, hasForm: false, email: null, phone: null, whatsapp: null }
-  let home: Page
-  try {
-    home = await fetchPage(siteUrl)
-  } catch (err) {
-    return { ...result, error: `Website nahi khuli: ${err instanceof Error ? err.message : 'unknown'}` }
-  }
+export type Page = { url: string; html: string }
+type Load = (url: string) => Promise<Page>
 
+// render = website ko asli browser (Chrome) me kholna — sirf tab jab saada HTML padh ke na form mila na
+// WhatsApp (JavaScript wali sites: React/Next.js/Wix…, ya jo bot ko block karti hain)
+export async function discoverContact(siteUrl: string, defaultCountryCode: string, render?: Load): Promise<Discovery> {
+  let raw: Crawl | null = null
+  let rawError: string | undefined
+  try {
+    raw = await crawl(fetchPage, siteUrl, null)
+  } catch (err) {
+    rawError = `Website nahi khuli: ${err instanceof Error ? err.message : 'unknown'}`
+  }
+  const result = raw ? extract(raw, defaultCountryCode) : empty()
+  if (!render || result.hasForm || result.whatsapp) return rawError ? { ...result, error: rawError } : result
+  // Domain hi nahi hai / private address: browser se bhi nahi khulega. (HTTP 403 jaise errors par browser try hota hai)
+  if (rawError && /ENOTFOUND|Private\/local|Sirf http/i.test(rawError)) return { ...result, error: rawError }
+
+  try {
+    const rendered = await crawl(render, raw?.home.url ?? siteUrl, raw?.contactPage?.url ?? null)
+    return merge(result, extract(rendered, defaultCountryCode))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    // Saada fetch chal gaya tha to jo mila woh rakho, bas bata do ki browser check nahi hua
+    return { ...result, error: rawError, warning: message }
+  }
+}
+
+type Crawl = { home: Page; contactPage: Page | null; pages: Page[] }
+
+// Homepage kholo -> "Contact us" page dhundh ke woh bhi kholo
+async function crawl(load: Load, startUrl: string, knownContact: string | null): Promise<Crawl> {
+  const home = await load(startUrl)
   const pages: Page[] = [home]
   let contactPage: Page | null = /contact|enquir|inquir|touch/i.test(new URL(home.url).pathname) ? home : null
 
   if (!contactPage) {
-    // Homepage par contact link mila to wahi (top 2), warna aam paths — max 3 try taaki 20 sites
-    // ek click me time par ho jaayein
+    // Homepage par contact link mila to wahi (top 2), warna pehle mila contact page, warna aam paths —
+    // max 3 try taaki 20 sites ek click me time par ho jaayein. Browser slow hai: wahan sirf 1 page.
     const links = contactLinks(home).filter((u) => u !== home.url)
-    const tries = links.length ? links.slice(0, 2) : FALLBACK_PATHS.slice(0, 3).map((p) => new URL(p, home.url).toString())
+    const limit = load === fetchPage ? 2 : 1
+    const tries = links.length
+      ? links.slice(0, limit)
+      : knownContact
+        ? [knownContact]
+        : load === fetchPage
+          ? FALLBACK_PATHS.slice(0, 3).map((p) => new URL(p, home.url).toString())
+          : []
     for (const url of tries) {
       try {
-        const page = await fetchPage(url)
+        const page = await load(url)
         if (sameSite(page.url, home.url)) {
           contactPage = page
           pages.push(page)
@@ -64,7 +95,15 @@ export async function discoverContact(siteUrl: string, defaultCountryCode: strin
       }
     }
   }
+  return { home, contactPage, pages }
+}
 
+function empty(): Discovery {
+  return { contactUrl: null, hasForm: false, email: null, phone: null, whatsapp: null }
+}
+
+function extract({ home, contactPage, pages }: Crawl, defaultCountryCode: string): Discovery {
+  const result = empty()
   // Form: pehle contact page par, warna homepage par
   const formPage = [contactPage, home].find((p): p is Page => !!p && hasContactForm(p.html)) ?? null
   result.hasForm = !!formPage
@@ -80,9 +119,19 @@ export async function discoverContact(siteUrl: string, defaultCountryCode: strin
   return result
 }
 
+// Saade fetch me jo mila woh pehle, browser se mila baaki bharta hai
+function merge(a: Discovery, b: Discovery): Discovery {
+  return {
+    hasForm: a.hasForm || b.hasForm,
+    contactUrl: a.hasForm ? a.contactUrl : b.hasForm ? b.contactUrl : (a.contactUrl ?? b.contactUrl),
+    email: a.email ?? b.email,
+    phone: a.phone ?? b.phone,
+    whatsapp: a.whatsapp ?? b.whatsapp,
+  }
+}
+
 // ---------- page fetch (sirf public internet, private IPs blocked) ----------
 
-type Page = { url: string; html: string }
 
 async function fetchPage(startUrl: string): Promise<Page> {
   let url = startUrl
@@ -117,27 +166,6 @@ async function readLimited(res: Response): Promise<string> {
   }
   await reader.cancel().catch(() => {})
   return new TextDecoder().decode(Buffer.concat(chunks))
-}
-
-// Server se localhost / cloud metadata / private network na khul jaaye
-async function assertPublicHost(url: string): Promise<void> {
-  const { protocol, hostname } = new URL(url)
-  if (protocol !== 'http:' && protocol !== 'https:') throw new Error('Sirf http/https')
-  const host = hostname.replace(/^\[|\]$/g, '')
-  const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address)
-  if (addrs.length === 0 || addrs.some(isPrivateIp)) throw new Error('Private/local address allowed nahi')
-}
-
-function isPrivateIp(ip: string): boolean {
-  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip
-  if (isIP(v4) === 4) {
-    const [a, b] = v4.split('.').map(Number)
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224
-  }
-  const v6 = ip.toLowerCase()
-  return v6 === '::' || v6 === '::1' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe8') ||
-    v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')
 }
 
 // ---------- HTML se cheezein nikaalna ----------
@@ -215,13 +243,15 @@ const CALLING_CODES: Record<string, string> = {
   BR: '55', MX: '52', AR: '54', CL: '56', CO: '57', PE: '51',
 }
 
-// Website ka desh: pehle domain ka ending (.co.uk, .ae, .com.au…), phir <html lang="en-US"> ka region.
+// Website ka desh: pehle domain ka ending (.co.uk, .ae, .com.au…), phir <html lang="en-US"> / og:locale (en_AE) ka region.
 // .com jaise generic domain par kuch pata na chale to DEFAULT_COUNTRY_CODE (khaali ho to '' = pata nahi).
 function countryCode(page: Page, fallback: string): string {
   const tld = new URL(page.url).hostname.split('.').pop()!.toUpperCase()
   if (CALLING_CODES[tld]) return CALLING_CODES[tld]
-  const region = page.html.match(/<html\b[^>]*\blang\s*=\s*["']?[a-z]{2,3}[-_]([a-z]{2})\b/i)?.[1].toUpperCase()
-  if (region && CALLING_CODES[region]) return CALLING_CODES[region]
+  const region =
+    page.html.match(/<html\b[^>]*\blang\s*=\s*["']?[a-z]{2,3}[-_]([a-z]{2})\b/i)?.[1] ??
+    page.html.match(/<meta\b[^>]*property\s*=\s*["']og:locale["'][^>]*content\s*=\s*["'][a-z]{2,3}[-_]([a-z]{2})\b/i)?.[1]
+  if (region && CALLING_CODES[region.toUpperCase()]) return CALLING_CODES[region.toUpperCase()]
   return fallback
 }
 

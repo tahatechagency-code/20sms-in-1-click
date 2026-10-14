@@ -14,7 +14,7 @@ export type Channel = 'email' | 'contact_form' | 'whatsapp' | 'sms'
 export type AssistedChannel = Exclude<Channel, 'email'>
 export const ASSISTED_CHANNELS: AssistedChannel[] = ['contact_form', 'whatsapp', 'sms']
 
-// Send Batch par aap chunte ho: sirf email, sirf contact page (form na mile to WhatsApp/SMS), ya dono
+// Send Batch par aap chunte ho: sirf email, sirf contact page (form na mile to WhatsApp), ya dono
 export type SendMode = 'email' | 'contact_form' | 'both'
 
 export const SEND_MODE_LABELS: Record<SendMode, string> = {
@@ -30,14 +30,17 @@ export const CHANNEL_LABELS: Record<Channel, string> = {
   sms: 'SMS',
 }
 
-// Contact page par form mila -> wahi. Form nahi mila -> website par mila WhatsApp, phir phone (SMS).
+// Contact page par form mila -> wahi. Form nahi mila -> website par mila WhatsApp. Dono nahi -> null
+// (NOT_AVAILABLE). Batch SMS nahi bhejta: website ke number aksar
+// landline / toll-free hote hain jahan SMS pahunchta hi nahi (Leads page par SMS button ab bhi hai).
 // has_form null = abhi check nahi hua / site nahi khuli -> contact page hi try karo.
 export function assistedChannel(lead: Lead): AssistedChannel | null {
   if (lead.contact_url && lead.has_form !== false) return 'contact_form'
   if (lead.whatsapp) return 'whatsapp'
-  if (lead.phone) return 'sms'
   return null
 }
+
+export const NOT_AVAILABLE = 'Contact form / WhatsApp number available nahi hai'
 
 export type Lead = {
   id: string

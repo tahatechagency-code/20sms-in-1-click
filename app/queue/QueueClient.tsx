@@ -14,6 +14,7 @@ import {
 import {
   assistedChannel,
   CHANNEL_LABELS,
+  NOT_AVAILABLE,
   SEND_MODE_LABELS,
   STATUS_LABELS,
   type Lead,
@@ -48,7 +49,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
 
   const lineCount = listText.split(/\r?\n/).filter((l) => l.trim()).length
   // Samajh na aayi lines hat jaati hain. Same website kai baar ho to har line alag slot hai
-  // (form/WhatsApp/SMS card har line ka), par email har business ko ek hi baar jaata hai.
+  // (form/WhatsApp card har line ka), par email har business ko ek hi baar jaata hai.
   const sendable = (loaded ?? []).filter((t) => t.lead)
   const withEmail = new Set(sendable.filter((t) => t.lead!.email).map((t) => t.lead!.id)).size
   const withContact = sendable.filter((t) => assistedChannel(t.lead!)).length
@@ -133,7 +134,8 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
     <div>
       <h1>Send Batch</h1>
       <p className="sub">
-        Step 1: max {batchSize} websites load karo — app khud har website ka contact page, form, WhatsApp/phone aur email dhundhta hai.
+        Step 1: max {batchSize} websites ke link do — app khud har website kholta hai (zaroorat ho to asli browser me) aur contact
+        page ka form, warna WhatsApp number dhundhta hai. Dono na mile to batata hai &quot;{NOT_AVAILABLE}&quot;.
         Step 2: chuno sirf email, sirf contact form/WhatsApp ya dono.
       </p>
 
@@ -175,7 +177,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
           <div className="field">
             <label htmlFor="list">
               Har line me ek: email ya website / contact-page URL (max {batchSize}). Naam bhi dena ho to: <code>Naam, email-ya-url</code>.
-              Same website jitni baar likhoge, utne alag message banenge (form / WhatsApp / SMS).
+              Same website jitni baar likhoge, utne alag message banenge (form / WhatsApp).
             </label>
             <textarea
               id="list"
@@ -196,13 +198,13 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         )}
 
         <button className="btn" onClick={load} disabled={pending || (source === 'list' && (lineCount === 0 || lineCount > batchSize))}>
-          {pending ? 'Websites check ho rahi hain (contact page, form, WhatsApp)…' : 'Load karo'}
+          {pending ? 'Websites khul rahi hain (contact page, form, WhatsApp) — 1 minute tak lag sakta hai…' : 'Load karo'}
         </button>
 
         {loaded && (
           <div style={{ marginTop: 14 }}>
             <p className="pill">
-              {sendable.length} ready · {withContact} form/WhatsApp/SMS · {withEmail} email
+              {sendable.length} ready · {withContact} form/WhatsApp · {withEmail} email
             </p>
             {loaded.length === 0 && <p className="sub" style={{ marginTop: 8 }}>Abhi is category me koi lead ready nahi hai.</p>}
             {loaded.length > 0 && (
@@ -211,6 +213,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                   <tr>
                     <th>#</th>
                     <th>Business</th>
+                    <th>Message kahan jaayega</th>
                     <th>Contact form</th>
                     <th>WhatsApp / Phone</th>
                     <th>Email</th>
@@ -228,6 +231,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                           </div>
                         )}
                       </td>
+                      <td>{t.lead ? <RouteCell lead={t.lead} /> : '—'}</td>
                       <td>{t.lead ? <FormCell lead={t.lead} /> : '—'}</td>
                       <td>
                         {t.lead?.whatsapp && <div>WA: +{t.lead.whatsapp}</div>}
@@ -283,14 +287,13 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
 
       {result && !result.error && result.mode !== 'email' && (
         <div className="card">
-          <h2>Contact form / WhatsApp / SMS — {result.assisted.length} message ready</h2>
+          <h2>Contact form / WhatsApp — {result.assisted.length} message ready</h2>
           <p className="sub">
             Har card par ek button: <b>Form</b> wale par message copy hoke contact page khulta hai (paste + submit), <b>WhatsApp</b> par
-            chat message bhara hua khulta hai (bas Send dabao), <b>SMS</b> phone par message bhara hua khulta hai. Bhejne ke baad
-            &quot;Sent&quot; dabao.
+            chat message bhara hua khulta hai (bas Send dabao). Bhejne ke baad &quot;Sent&quot; dabao.
           </p>
 
-          {result.assisted.length === 0 && <p className="sub">Load kiye hue businesses me na contact form mila, na WhatsApp/phone.</p>}
+          {result.assisted.length === 0 && <p className="sub">Load kiye hue businesses me {NOT_AVAILABLE.toLowerCase()}.</p>}
 
           {result.assisted.map((item) => {
             const done = sentSlots.has(item.slot)
@@ -305,7 +308,6 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                   <span className="pill">
                     {item.channel === 'contact_form' && item.lead.website}
                     {item.channel === 'whatsapp' && `+${item.lead.whatsapp}`}
-                    {item.channel === 'sms' && item.lead.phone}
                   </span>
                 </div>
                 <pre>{item.body}</pre>
@@ -318,11 +320,6 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                   {item.channel === 'whatsapp' && (
                     <a className="btn small" href={`https://wa.me/${item.lead.whatsapp}?text=${encodeURIComponent(item.body)}`} target="_blank" rel="noreferrer">
                       WhatsApp kholo (message bhara hua)
-                    </a>
-                  )}
-                  {item.channel === 'sms' && (
-                    <a className="btn small" href={`sms:${item.lead.phone}?&body=${encodeURIComponent(item.body)}`}>
-                      SMS kholo (phone par)
                     </a>
                   )}
                   <button className="btn secondary small" onClick={() => copyMessage(item.slot, item.body)}>
@@ -341,6 +338,19 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
   )
 }
 
+// Load ke baad har website ka faisla: form -> WhatsApp -> available nahi
+function RouteCell({ lead }: { lead: Lead }) {
+  const channel = assistedChannel(lead)
+  if (channel === 'contact_form') return <span style={{ color: 'var(--ok)' }}>✓ Contact form</span>
+  if (channel === 'whatsapp') return <span style={{ color: 'var(--ok)' }}>✓ WhatsApp +{lead.whatsapp}</span>
+  return (
+    <span style={{ color: 'var(--err)' }}>
+      ✗ {NOT_AVAILABLE}
+      {lead.email && <span className="pill"> — sirf email jaa sakta hai</span>}
+    </span>
+  )
+}
+
 function FormCell({ lead }: { lead: Lead }) {
   if (lead.has_form === true && lead.contact_url)
     return <a href={lead.contact_url} target="_blank" rel="noreferrer">Form mila ✓</a>
@@ -351,12 +361,12 @@ function FormCell({ lead }: { lead: Lead }) {
 
 function modeHelp(mode: SendMode, withEmail: number, withContact: number): string {
   if (mode === 'email') return `${withEmail} businesses ko automatic email (har business ko ek hi)`
-  if (mode === 'contact_form') return `${withContact} message ready — form, warna WhatsApp, warna SMS`
-  return `${withEmail} ko email + ${withContact} form/WhatsApp/SMS message ready`
+  if (mode === 'contact_form') return `${withContact} message ready — form, warna WhatsApp`
+  return `${withEmail} ko email + ${withContact} form/WhatsApp message ready`
 }
 
 function buttonLabel(mode: SendMode, n: number): string {
   if (mode === 'email') return `${n} loaded businesses ko email bhejo`
-  if (mode === 'contact_form') return `${n} form / WhatsApp / SMS messages taiyaar karo`
-  return `${n} loaded businesses ko email + form/WhatsApp/SMS bhejo`
+  if (mode === 'contact_form') return `${n} form / WhatsApp messages taiyaar karo`
+  return `${n} loaded businesses ko email + form/WhatsApp bhejo`
 }
