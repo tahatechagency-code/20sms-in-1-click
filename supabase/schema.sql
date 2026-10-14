@@ -10,6 +10,10 @@ create table if not exists leads (
   contact_url text,
   contact_person text,
   notes text,
+  phone text,
+  whatsapp text,
+  has_form boolean,
+  discovered_at timestamptz,
   status text not null default 'new'
     check (status in ('new', 'contacted', 'replied', 'won', 'not_interested', 'do_not_contact')),
   followups_sent int not null default 0,
@@ -34,7 +38,7 @@ create table if not exists templates (
 create table if not exists outreach_log (
   id uuid primary key default gen_random_uuid(),
   lead_id uuid not null references leads (id) on delete cascade,
-  channel text not null check (channel in ('email', 'contact_form')),
+  channel text not null check (channel in ('email', 'contact_form', 'whatsapp', 'sms')),
   kind text not null check (kind in ('first', 'followup')),
   subject text,
   body text not null,

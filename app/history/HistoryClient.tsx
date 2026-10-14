@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useMemo, useState } from 'react'
-import type { OutreachLogEntry } from '@/lib/types'
+import { CHANNEL_LABELS, type OutreachLogEntry } from '@/lib/types'
 
 type Filter = 'all' | 'ok' | 'failed'
 
@@ -64,7 +64,7 @@ export default function HistoryClient({ log }: { log: OutreachLogEntry[] }) {
                       <div>{entry.lead?.business_name ?? '(deleted lead)'}</div>
                       {entry.lead?.website && <div className="pill">{entry.lead.website}</div>}
                     </td>
-                    <td>{entry.channel === 'email' ? 'Email' : 'Contact form'}</td>
+                    <td>{CHANNEL_LABELS[entry.channel] ?? entry.channel}</td>
                     <td>{entry.kind === 'first' ? 'Pehla' : 'Follow-up'}</td>
                     <td>
                       <span className={`badge ${entry.ok ? 'replied' : 'do_not_contact'}`}>

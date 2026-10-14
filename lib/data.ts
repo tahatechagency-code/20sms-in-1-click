@@ -22,12 +22,13 @@ function followupCutoff(): string {
 // Batch ke liye leads: har business ko pehla message sirf ek baar, follow-up limit ke andar
 // (Supabase-js ke chained builder types deeply generic hain isliye yahan `any` se chain karte hain;
 //  result Lead[] me cast hota hai, so runtime shape wahi controlled rehta hai.)
-// mode: 'email' = jinka email hai, 'contact_form' = jinka contact page hai, 'both' = dono me se koi bhi ho
+// mode: 'email' = jinka email hai; baaki modes me jinka contact page ya website hai (website se contact
+// page / WhatsApp / phone load par khud dhundha jaata hai)
 export async function getCandidates(mode: SendMode, kind: TemplateKind, limit: number): Promise<Lead[]> {
   let query: any = db().from('leads').select('*') // eslint-disable-line @typescript-eslint/no-explicit-any
   if (mode === 'email') query = query.not('email', 'is', null)
-  else if (mode === 'contact_form') query = query.not('contact_url', 'is', null)
-  else query = query.or('email.not.is.null,contact_url.not.is.null')
+  else if (mode === 'contact_form') query = query.or('contact_url.not.is.null,website.not.is.null')
+  else query = query.or('email.not.is.null,contact_url.not.is.null,website.not.is.null')
   query =
     kind === 'first'
       ? query.eq('status', 'new')

@@ -10,19 +10,26 @@ kisi ek website ko baar-baar spam nahi.
 - **Templates:** ek "pehla message" aur ek "follow-up" template, `{business_name}`, `{website}`,
   `{contact_person}`, `{my_name}`, `{my_portfolio}` placeholders ke saath
 - **Send Batch — 2 step:**
-  1. **Load:** max 20 businesses load karo — ya to **apni list** paste karo (har line me ek email ya
-     website/contact-page URL, chahe to aage naam: `Gupta Bakery, guptabakery.in/contact`), ya
-     **leads list se agle N**. Apni list ki har line apne aap lead ban jaati hai (pehle se hai to wahi use hoti hai)
+  1. **Load:** max 20 websites load karo — ya to **apni list** paste karo (har line me ek email ya
+     website/contact-page URL, chahe to aage naam: `Gupta Bakery, guptabakery.in`), ya **leads list se agle N**.
+     Load par app **khud har website kholta hai** aur dhundhta hai:
+     - **Contact us page** (homepage ke links se, warna `/contact`, `/contact-us`…)
+     - us par **contact form hai ya nahi** (normal `<form>` + WordPress CF7/WPForms, Google Forms, Typeform, HubSpot, Zoho…)
+     - **WhatsApp number** (`wa.me` / WhatsApp links), **phone** (`tel:` links) aur **email**
+     Sab lead me save hota hai (7 din tak dobara check nahi hota). Table me har website ka result dikhta hai.
   2. **Send (1 click)** — load kiye hue sab businesses ko, aap chuno:
-     - **Sirf Email:** jinka email hai unhe aapki SMTP se automatic email, roz ka safety limit bhi hai
-     - **Sirf Contact page:** jinka contact page hai unke message ready; aap khud contact page kholke
-       paste-submit karte ho, phir "Sent" mark karte ho (har website ka apna real, manual submission)
-     - **Dono:** email wale ko email automatic + contact page wale ka message ready
-  - **Same website kai baar (testing):** list me ek hi website jitni baar likhoge, contact page ke utne alag
-    message cards banenge (har line apna slot, har "Sent" history me alag record). Email fir bhi har business ko
-    ek hi baar jaata hai — ek inbox par kai copies se aapka SMTP account block ho jaata hai
+     - **Sirf Email:** jinka email hai (ya website par mila) unhe aapki SMTP se automatic email, roz ka safety limit bhi hai
+     - **Sirf Contact page / WhatsApp:** har business ke liye best rasta khud chuna jaata hai —
+       **form mila → Form** card ("Copy + Contact page kholo": message copy hoke page khulta hai, paste + submit),
+       **form nahi → WhatsApp** card (chat message bhara hua khulta hai, bas Send),
+       **WhatsApp bhi nahi → SMS** card (phone par message bhara hua khulta hai). Bhejne ke baad "Sent" dabao
+     - **Dono:** email automatic + upar wala form/WhatsApp/SMS
+  - **Same website kai baar (testing):** list me ek hi website jitni baar likhoge, utne alag message cards banenge
+    (har line apna slot, har "Sent" history me alag record). Email fir bhi har business ko ek hi baar jaata hai
   - Ek round ke baad woh website "Contacted" ho jaati hai; dobara test karna ho to `/leads` par uska status wapas
     **New** kar do
+  - Form / WhatsApp / SMS ka aakhri "Send" aap khud dabate ho: bot se form submit karna ya WhatsApp/SMS automatic
+    bhejna CAPTCHA me atakta hai, aur WhatsApp unknown numbers ko bulk message par number ban kar deta hai
 - **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
   configurable din baad, aur ek limited baar
 - **Kitne bhejne hai, aap chuno:** 1 se `BATCH_SIZE` tak — aaj 10 chahiye to 10, kal 20 chahiye to 20
@@ -39,6 +46,8 @@ Next.js 16 (App Router, Server Actions) + Supabase (Postgres, service-role key s
 
 1. **Supabase project banao** ([supabase.com](https://supabase.com)) → SQL Editor me
    `supabase/schema.sql` ki poori file paste karke run karo.
+   **Pehle se chal raha project hai?** To ek baar `supabase/migrations/002_contact_discovery.sql` bhi run karo
+   (phone / WhatsApp / form wale naye columns).
 2. `.env.example` ko `.env.local` me copy karo aur bharo:
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` → Supabase Project Settings → API
    - `APP_PASSWORD` → apna dashboard password
@@ -90,3 +99,4 @@ ho jaati hai. Ab is case me app crash nahi hota — ek friendly error screen dik
 - `DAILY_LIMIT` (default 60) — 24 ghante me max kitne emails
 - `FOLLOWUP_DAYS` (default 4) — follow-up se pehle kitne din wait
 - `MAX_FOLLOWUPS` (default 1) — ek business ko max kitne follow-up
+- `DEFAULT_COUNTRY_CODE` (default 91) — website par number bina country code ke ho to WhatsApp/SMS ke liye yeh lagta hai

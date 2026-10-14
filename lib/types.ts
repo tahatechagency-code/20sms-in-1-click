@@ -9,14 +9,34 @@ export const STATUSES = [
 
 export type LeadStatus = (typeof STATUSES)[number]
 export type TemplateKind = 'first' | 'followup'
-export type Channel = 'email' | 'contact_form'
-// Send Batch par aap chunte ho: sirf email, sirf contact page, ya dono ek saath
-export type SendMode = Channel | 'both'
+export type Channel = 'email' | 'contact_form' | 'whatsapp' | 'sms'
+// Jo channel aap khud 1 tap me bhejte ho (app message taiyaar karta hai)
+export type AssistedChannel = Exclude<Channel, 'email'>
+export const ASSISTED_CHANNELS: AssistedChannel[] = ['contact_form', 'whatsapp', 'sms']
+
+// Send Batch par aap chunte ho: sirf email, sirf contact page (form na mile to WhatsApp/SMS), ya dono
+export type SendMode = 'email' | 'contact_form' | 'both'
 
 export const SEND_MODE_LABELS: Record<SendMode, string> = {
   email: 'Sirf Email',
-  contact_form: 'Sirf Contact page',
-  both: 'Dono (Email + Contact page)',
+  contact_form: 'Sirf Contact page / WhatsApp',
+  both: 'Dono (Email + Contact page / WhatsApp)',
+}
+
+export const CHANNEL_LABELS: Record<Channel, string> = {
+  email: 'Email',
+  contact_form: 'Contact form',
+  whatsapp: 'WhatsApp',
+  sms: 'SMS',
+}
+
+// Contact page par form mila -> wahi. Form nahi mila -> website par mila WhatsApp, phir phone (SMS).
+// has_form null = abhi check nahi hua / site nahi khuli -> contact page hi try karo.
+export function assistedChannel(lead: Lead): AssistedChannel | null {
+  if (lead.contact_url && lead.has_form !== false) return 'contact_form'
+  if (lead.whatsapp) return 'whatsapp'
+  if (lead.phone) return 'sms'
+  return null
 }
 
 export type Lead = {
@@ -27,6 +47,10 @@ export type Lead = {
   contact_url: string | null
   contact_person: string | null
   notes: string | null
+  phone: string | null // website se mila (+91…)
+  whatsapp: string | null // website se mila, wa.me format (sirf digits)
+  has_form: boolean | null // contact page par form mila? null = check nahi hua
+  discovered_at: string | null
   status: LeadStatus
   followups_sent: number
   last_contacted_at: string | null

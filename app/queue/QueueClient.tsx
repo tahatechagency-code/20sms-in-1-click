@@ -5,13 +5,22 @@ import { useState, useTransition } from 'react'
 import {
   loadFromLeads,
   loadFromList,
-  markContactFormSent,
+  markAssistedSent,
   sendToLoaded,
   type AssistedLead,
   type BatchResult,
   type LoadedTarget,
 } from '../actions/queue'
-import { SEND_MODE_LABELS, STATUS_LABELS, type LeadStatus, type SendMode, type TemplateKind } from '@/lib/types'
+import {
+  assistedChannel,
+  CHANNEL_LABELS,
+  SEND_MODE_LABELS,
+  STATUS_LABELS,
+  type Lead,
+  type LeadStatus,
+  type SendMode,
+  type TemplateKind,
+} from '@/lib/types'
 
 type Props = {
   counts: Record<LeadStatus, number>
@@ -39,10 +48,10 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
 
   const lineCount = listText.split(/\r?\n/).filter((l) => l.trim()).length
   // Samajh na aayi lines hat jaati hain. Same website kai baar ho to har line alag slot hai
-  // (contact page card har line ka), par email har business ko ek hi baar jaata hai.
+  // (form/WhatsApp/SMS card har line ka), par email har business ko ek hi baar jaata hai.
   const sendable = (loaded ?? []).filter((t) => t.lead)
   const withEmail = new Set(sendable.filter((t) => t.lead!.email).map((t) => t.lead!.id)).size
-  const withContact = sendable.filter((t) => t.lead!.contact_url).length
+  const withContact = sendable.filter((t) => assistedChannel(t.lead!)).length
 
   // count ko hamesha 1..batchSize ke beech rakhte hain, khali box se bhi crash na ho
   function updateCount(raw: string) {
@@ -98,10 +107,16 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
     }
   }
 
+  // Pehle copy, phir tab kholo — tab khulne ke baad page focus kho deta hai aur clipboard fail hota hai
+  async function copyAndOpen(slot: number, text: string, url: string) {
+    await copyMessage(slot, text)
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   function markSent(item: AssistedLead) {
     setSentSlots((prev) => new Set(prev).add(item.slot))
     startTransition(async () => {
-      const res = await markContactFormSent(item.lead.id, kind, item.subject, item.body)
+      const res = await markAssistedSent(item.lead.id, kind, item.channel, item.subject, item.body)
       if (!res.ok) {
         setSentSlots((prev) => {
           const next = new Set(prev)
@@ -118,7 +133,8 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
     <div>
       <h1>Send Batch</h1>
       <p className="sub">
-        Step 1: max {batchSize} businesses load karo. Step 2: chuno sirf email, sirf contact page ya dono — 1 click me sabko chala jaata hai.
+        Step 1: max {batchSize} websites load karo — app khud har website ka contact page, form, WhatsApp/phone aur email dhundhta hai.
+        Step 2: chuno sirf email, sirf contact form/WhatsApp ya dono.
       </p>
 
       <div className="stats">
@@ -159,7 +175,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
           <div className="field">
             <label htmlFor="list">
               Har line me ek: email ya website / contact-page URL (max {batchSize}). Naam bhi dena ho to: <code>Naam, email-ya-url</code>.
-              Same website jitni baar likhoge, contact page ke utne alag message banenge.
+              Same website jitni baar likhoge, utne alag message banenge (form / WhatsApp / SMS).
             </label>
             <textarea
               id="list"
@@ -180,13 +196,13 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         )}
 
         <button className="btn" onClick={load} disabled={pending || (source === 'list' && (lineCount === 0 || lineCount > batchSize))}>
-          {pending ? 'Load ho raha hai…' : 'Load karo'}
+          {pending ? 'Websites check ho rahi hain (contact page, form, WhatsApp)…' : 'Load karo'}
         </button>
 
         {loaded && (
           <div style={{ marginTop: 14 }}>
             <p className="pill">
-              {sendable.length} ready · {withContact} contact page · {withEmail} email
+              {sendable.length} ready · {withContact} form/WhatsApp/SMS · {withEmail} email
             </p>
             {loaded.length === 0 && <p className="sub" style={{ marginTop: 8 }}>Abhi is category me koi lead ready nahi hai.</p>}
             {loaded.length > 0 && (
@@ -195,8 +211,9 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                   <tr>
                     <th>#</th>
                     <th>Business</th>
+                    <th>Contact form</th>
+                    <th>WhatsApp / Phone</th>
                     <th>Email</th>
-                    <th>Contact page</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -211,8 +228,13 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                           </div>
                         )}
                       </td>
+                      <td>{t.lead ? <FormCell lead={t.lead} /> : '—'}</td>
+                      <td>
+                        {t.lead?.whatsapp && <div>WA: +{t.lead.whatsapp}</div>}
+                        {t.lead?.phone && <div className="pill">{t.lead.phone}</div>}
+                        {!t.lead?.whatsapp && !t.lead?.phone && '—'}
+                      </td>
                       <td>{t.lead?.email ?? '—'}</td>
-                      <td>{t.lead?.contact_url ? <a href={t.lead.contact_url} target="_blank" rel="noreferrer">{t.lead.website ?? 'link'}</a> : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -261,13 +283,14 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
 
       {result && !result.error && result.mode !== 'email' && (
         <div className="card">
-          <h2>Contact page — {result.assisted.length} message ready</h2>
+          <h2>Contact form / WhatsApp / SMS — {result.assisted.length} message ready</h2>
           <p className="sub">
-            Har card ka message ready hai — contact page kholo, apne login se paste-submit karo, phir yahan &quot;Sent&quot; dabao.
-            Isse har website ka apna real submission hota hai, koi cross-site auto-fill nahi.
+            Har card par ek button: <b>Form</b> wale par message copy hoke contact page khulta hai (paste + submit), <b>WhatsApp</b> par
+            chat message bhara hua khulta hai (bas Send dabao), <b>SMS</b> phone par message bhara hua khulta hai. Bhejne ke baad
+            &quot;Sent&quot; dabao.
           </p>
 
-          {result.assisted.length === 0 && <p className="sub">Load kiye hue businesses me kisi ka contact page link nahi hai.</p>}
+          {result.assisted.length === 0 && <p className="sub">Load kiye hue businesses me na contact form mila, na WhatsApp/phone.</p>}
 
           {result.assisted.map((item) => {
             const done = sentSlots.has(item.slot)
@@ -276,16 +299,34 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
                 <div className="top">
                   <span className="name">
                     #{item.slot + 1} {item.lead.business_name}
+                    <span className="badge new" style={{ marginLeft: 8 }}>{CHANNEL_LABELS[item.channel]}</span>
                     {item.emailed && <span className="pill" style={{ color: 'var(--ok)', marginLeft: 8 }}>Email bhi gaya ✓</span>}
                   </span>
-                  {item.lead.contact_url && (
-                    <a href={item.lead.contact_url} target="_blank" rel="noreferrer">Contact page kholein →</a>
-                  )}
+                  <span className="pill">
+                    {item.channel === 'contact_form' && item.lead.website}
+                    {item.channel === 'whatsapp' && `+${item.lead.whatsapp}`}
+                    {item.channel === 'sms' && item.lead.phone}
+                  </span>
                 </div>
                 <pre>{item.body}</pre>
                 <div className="actions">
+                  {item.channel === 'contact_form' && (
+                    <button className="btn small" onClick={() => copyAndOpen(item.slot, item.body, item.lead.contact_url!)}>
+                      {copiedSlot === item.slot ? 'Copied ✓ — page khul gaya' : 'Copy + Contact page kholo'}
+                    </button>
+                  )}
+                  {item.channel === 'whatsapp' && (
+                    <a className="btn small" href={`https://wa.me/${item.lead.whatsapp}?text=${encodeURIComponent(item.body)}`} target="_blank" rel="noreferrer">
+                      WhatsApp kholo (message bhara hua)
+                    </a>
+                  )}
+                  {item.channel === 'sms' && (
+                    <a className="btn small" href={`sms:${item.lead.phone}?&body=${encodeURIComponent(item.body)}`}>
+                      SMS kholo (phone par)
+                    </a>
+                  )}
                   <button className="btn secondary small" onClick={() => copyMessage(item.slot, item.body)}>
-                    {copiedSlot === item.slot ? 'Copied ✓' : 'Message copy karein'}
+                    {copiedSlot === item.slot ? 'Copied ✓' : 'Sirf copy'}
                   </button>
                   <button className="btn small" disabled={done || pending} onClick={() => markSent(item)}>
                     {done ? 'Sent ✓' : 'Sent mark karein'}
@@ -300,14 +341,22 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
   )
 }
 
+function FormCell({ lead }: { lead: Lead }) {
+  if (lead.has_form === true && lead.contact_url)
+    return <a href={lead.contact_url} target="_blank" rel="noreferrer">Form mila ✓</a>
+  if (lead.has_form === false) return <span className="pill">Form nahi mila</span>
+  if (lead.contact_url) return <a href={lead.contact_url} target="_blank" rel="noreferrer">Page (check nahi hua)</a>
+  return <>—</>
+}
+
 function modeHelp(mode: SendMode, withEmail: number, withContact: number): string {
   if (mode === 'email') return `${withEmail} businesses ko automatic email (har business ko ek hi)`
-  if (mode === 'contact_form') return `${withContact} contact pages ke message ready — aap paste-submit karo`
-  return `${withEmail} ko email + ${withContact} contact page message ready`
+  if (mode === 'contact_form') return `${withContact} message ready — form, warna WhatsApp, warna SMS`
+  return `${withEmail} ko email + ${withContact} form/WhatsApp/SMS message ready`
 }
 
 function buttonLabel(mode: SendMode, n: number): string {
   if (mode === 'email') return `${n} loaded businesses ko email bhejo`
-  if (mode === 'contact_form') return `${n} contact page messages taiyaar karo`
-  return `${n} loaded businesses ko email + contact page bhejo`
+  if (mode === 'contact_form') return `${n} form / WhatsApp / SMS messages taiyaar karo`
+  return `${n} loaded businesses ko email + form/WhatsApp/SMS bhejo`
 }

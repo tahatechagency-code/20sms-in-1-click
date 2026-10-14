@@ -21,7 +21,8 @@ export async function addLead(formData: FormData): Promise<ActionResult> {
   const contactPerson = String(formData.get('contact_person') ?? '').trim() || null
   const notes = String(formData.get('notes') ?? '').trim() || null
 
-  if (!email && !contactUrl) return { ok: false, error: 'Email ya contact page link me se kam se kam ek do' }
+  if (!email && !contactUrl && !website)
+    return { ok: false, error: 'Email, website ya contact page link me se kam se kam ek do' }
 
   const { error } = await db().from('leads').insert({
     business_name: businessName,
@@ -59,9 +60,9 @@ export async function importLeadsCsv(formData: FormData): Promise<ActionResult> 
       contact_person: contact_person || null,
       notes: notes || null,
     }))
-    .filter((r) => r.business_name && (r.email || r.contact_url))
+    .filter((r) => r.business_name && (r.email || r.contact_url || r.website))
 
-  if (parsed.length === 0) return { ok: false, error: 'Koi valid row nahi mili (business_name + email ya contact_url chahiye)' }
+  if (parsed.length === 0) return { ok: false, error: 'Koi valid row nahi mili (business_name + email, website ya contact_url chahiye)' }
 
   const { error, count } = await db().from('leads').upsert(parsed, {
     onConflict: 'email',

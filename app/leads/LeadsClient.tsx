@@ -63,7 +63,7 @@ export default function LeadsClient({ leads }: { leads: Lead[] }) {
               <input name="email" type="email" placeholder="contact@example.com" />
             </div>
             <div className="field">
-              <label>Contact page URL (agar email nahi hai)</label>
+              <label>Contact page / website URL (form, WhatsApp, phone Send Batch par khud dhundha jaata hai)</label>
               <input name="contact_url" placeholder="https://example.com/contact" />
             </div>
           </div>
@@ -117,8 +117,12 @@ export default function LeadsClient({ leads }: { leads: Lead[] }) {
                   <td>
                     {lead.email && <div>{lead.email}</div>}
                     {lead.contact_url && (
-                      <a href={lead.contact_url} target="_blank" rel="noreferrer">contact page</a>
+                      <a href={lead.contact_url} target="_blank" rel="noreferrer">
+                        {lead.has_form ? 'contact form ✓' : 'contact page'}
+                      </a>
                     )}
+                    {lead.whatsapp && <div className="pill">WA: +{lead.whatsapp}</div>}
+                    {lead.phone && <div className="pill">{lead.phone}</div>}
                   </td>
                   <td>
                     <select value={lead.status} onChange={(e) => changeStatus(lead.id, e.target.value as LeadStatus)} disabled={pending}>
