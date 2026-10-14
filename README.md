@@ -99,4 +99,7 @@ ho jaati hai. Ab is case me app crash nahi hota — ek friendly error screen dik
 - `DAILY_LIMIT` (default 60) — 24 ghante me max kitne emails
 - `FOLLOWUP_DAYS` (default 4) — follow-up se pehle kitne din wait
 - `MAX_FOLLOWUPS` (default 1) — ek business ko max kitne follow-up
-- `DEFAULT_COUNTRY_CODE` (default 91) — website par number bina country code ke ho to WhatsApp/SMS ke liye yeh lagta hai
+- `DEFAULT_COUNTRY_CODE` (default khaali) — website par number bina country code ke ho to app pehle website se desh
+  khud pehchanta hai (`.co.uk` → 44, `.ae` → 971, `.com.au` → 61, `<html lang="en-US">` → 1…). Generic domain
+  (`.com`, `.net`) par desh pata na chale to yeh value lagti hai; khaali ho to aisa number chhod diya jaata hai
+  (galat desh ke number par WhatsApp na khule). Sab clients ek desh ke hon tabhi set karo
