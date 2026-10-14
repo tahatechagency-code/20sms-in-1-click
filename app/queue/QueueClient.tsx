@@ -169,22 +169,32 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
         </div>
 
         <div className="boxes">
-          {boxes.map((value, i) => (
-            <div className="box" key={i}>
-              <label htmlFor={`site-${i}`}>Website {i + 1}</label>
-              <input
-                id={`site-${i}`}
-                value={value}
-                onChange={(e) => setBox(i, e.target.value)}
-                onPaste={(e) => pasteBoxes(i, e)}
-                placeholder={i === 0 ? 'example.com ya Naam, example.com/contact' : 'website link'}
-                autoComplete="off"
-              />
-            </div>
-          ))}
+          {boxes.map((value, i) => {
+            const t = loaded?.find((x) => x.slot === i)
+            return (
+              <div className={`box${value.trim() ? ' filled' : ''}`} key={i}>
+                <label htmlFor={`site-${i}`}>
+                  <span className="num">{i + 1}</span> Box {i + 1}
+                </label>
+                <input
+                  id={`site-${i}`}
+                  value={value}
+                  onChange={(e) => setBox(i, e.target.value)}
+                  onPaste={(e) => pasteBoxes(i, e)}
+                  placeholder={i === 0 ? 'example.com ya Naam, example.com/contact' : 'website link'}
+                  autoComplete="off"
+                />
+                {t && (
+                  <div className="pill" style={{ marginTop: 4 }}>
+                    {t.lead ? <RouteCell lead={t.lead} /> : <span style={{ color: 'var(--err)' }}>{t.note}</span>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
-        <p className="pill">{filled}/{batchSize} websites bhari</p>
+        <p className="pill">{filled}/{batchSize} boxes bhare</p>
 
         <button className="btn" onClick={load} disabled={pending || filled === 0}>
           {pending ? 'Websites khul rahi hain (contact page, form, WhatsApp) — 1 minute tak lag sakta hai…' : 'Load karo'}
@@ -202,7 +212,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
               <table style={{ marginTop: 8 }}>
                 <thead>
                   <tr>
-                    <th>#</th>
+                    <th>Box</th>
                     <th>Business</th>
                     <th>Message kahan jaayega</th>
                     <th>Contact form</th>
@@ -295,7 +305,7 @@ export default function QueueClient({ counts, sentToday, dailyLimit, batchSize }
               <div className="leadcard" key={item.slot} style={{ opacity: done ? 0.5 : 1 }}>
                 <div className="top">
                   <span className="name">
-                    #{item.slot + 1} {item.lead.business_name}
+                    <span className="num">{item.slot + 1}</span> Box {item.slot + 1} — {item.lead.business_name}
                     {item.channel && <span className="badge new" style={{ marginLeft: 8 }}>{CHANNEL_LABELS[item.channel]}</span>}
                     {item.emailed && <span className="pill" style={{ color: 'var(--ok)', marginLeft: 8 }}>Email gaya ✓</span>}
                   </span>
