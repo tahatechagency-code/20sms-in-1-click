@@ -216,7 +216,7 @@ const CALLING_CODES: Record<string, string> = {
 }
 
 // Website ka desh: pehle domain ka ending (.co.uk, .ae, .com.au…), phir <html lang="en-US"> ka region.
-// .com jaise generic domain par kuch pata na chale to DEFAULT_COUNTRY_CODE.
+// .com jaise generic domain par kuch pata na chale to DEFAULT_COUNTRY_CODE (khaali ho to '' = pata nahi).
 function countryCode(page: Page, fallback: string): string {
   const tld = new URL(page.url).hostname.split('.').pop()!.toUpperCase()
   if (CALLING_CODES[tld]) return CALLING_CODES[tld]
@@ -231,7 +231,12 @@ function normalizePhone(raw: string, cc: string): string | null {
   if (raw.trim().startsWith('00')) digits = digits.slice(2)
   if (!plus) {
     digits = digits.replace(/^0+/, '')
-    if (digits.length <= 10) digits = cc + digits
+    if (digits.length <= 10) {
+      // Desh pata nahi aur DEFAULT_COUNTRY_CODE bhi nahi: andaaza nahi — galat desh ka code lagne se
+      // WhatsApp/SMS kisi anjaan ke number par khul jaata
+      if (!cc) return null
+      digits = cc + digits
+    }
   }
   return digits.length >= 10 && digits.length <= 15 ? digits : null
 }
