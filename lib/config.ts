@@ -8,7 +8,7 @@ export const config = {
   dailyLimit: num('DAILY_LIMIT', 60),
   followupDays: num('FOLLOWUP_DAYS', 4),
   maxFollowups: num('MAX_FOLLOWUPS', 1),
-  // Website par number bina country code ke ho (098xxxx / 98xxxx) to yeh lagta hai
+  // Website par number bina country code ke ho aur website se desh pata na chale (.com) to yeh lagta hai
   defaultCountryCode: (process.env.DEFAULT_COUNTRY_CODE ?? '91').replace(/\D/g, '') || '91',
 }
 

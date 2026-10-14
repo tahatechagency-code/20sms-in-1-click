@@ -70,10 +70,12 @@ export async function discoverContact(siteUrl: string, defaultCountryCode: strin
   result.hasForm = !!formPage
   result.contactUrl = formPage?.url ?? contactPage?.url ?? null
 
+  // Number bina country code ke ho (098… / (555) 123…) to website ka desh dekh ke code lagao
+  const cc = countryCode(home, defaultCountryCode)
   for (const page of pages) {
     result.email ??= findEmail(page.html)
-    result.whatsapp ??= findWhatsapp(page.html, defaultCountryCode)
-    result.phone ??= findPhone(page.html, defaultCountryCode)
+    result.whatsapp ??= findWhatsapp(page.html, cc)
+    result.phone ??= findPhone(page.html, cc)
   }
   return result
 }
@@ -201,6 +203,26 @@ function findEmail(html: string): string | null {
   const plain = text.replace(/<script[\s\S]*?<\/script>/gi, ' ').match(EMAIL_RE) ?? []
   const found = [...mailto, ...plain].map((e) => e.trim().toLowerCase()).find((e) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(e) && !BAD_EMAIL.test(e))
   return found ?? null
+}
+
+// Desh -> calling code (jo desh aam taur par clients ke hote hain)
+const CALLING_CODES: Record<string, string> = {
+  US: '1', CA: '1', GB: '44', UK: '44', IE: '353', AU: '61', NZ: '64', IN: '91', AE: '971', SA: '966',
+  QA: '974', KW: '965', OM: '968', BH: '973', SG: '65', MY: '60', PH: '63', ID: '62', TH: '66', VN: '84',
+  HK: '852', JP: '81', KR: '82', CN: '86', PK: '92', BD: '880', LK: '94', NP: '977', ZA: '27', NG: '234',
+  KE: '254', EG: '20', DE: '49', FR: '33', ES: '34', IT: '39', NL: '31', BE: '32', CH: '41', AT: '43',
+  SE: '46', NO: '47', DK: '45', FI: '358', PL: '48', PT: '351', GR: '30', TR: '90', IL: '972', RU: '7',
+  BR: '55', MX: '52', AR: '54', CL: '56', CO: '57', PE: '51',
+}
+
+// Website ka desh: pehle domain ka ending (.co.uk, .ae, .com.au…), phir <html lang="en-US"> ka region.
+// .com jaise generic domain par kuch pata na chale to DEFAULT_COUNTRY_CODE.
+function countryCode(page: Page, fallback: string): string {
+  const tld = new URL(page.url).hostname.split('.').pop()!.toUpperCase()
+  if (CALLING_CODES[tld]) return CALLING_CODES[tld]
+  const region = page.html.match(/<html\b[^>]*\blang\s*=\s*["']?[a-z]{2,3}[-_]([a-z]{2})\b/i)?.[1].toUpperCase()
+  if (region && CALLING_CODES[region]) return CALLING_CODES[region]
+  return fallback
 }
 
 function normalizePhone(raw: string, cc: string): string | null {
