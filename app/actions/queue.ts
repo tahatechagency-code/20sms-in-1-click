@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireAuth } from '@/lib/auth'
 import { config, getMe } from '@/lib/config'
-import { claimLead, emailsSentLast24h, getCandidates, getTemplates, ineligibleReason, optedOutReason, releaseLead } from '@/lib/data'
+import { claimLead, emailsSentLast24h, getTemplates, ineligibleReason, optedOutReason, releaseLead } from '@/lib/data'
 import { sendMail } from '@/lib/mailer'
 import { mapLimit } from '@/lib/pool'
 import { normalizeEmail, normalizeUrl, normalizeWebsite } from '@/lib/normalize'
@@ -15,14 +15,7 @@ import { ASSISTED_CHANNELS, assistedChannel, NOT_AVAILABLE, type AssistedChannel
 const SEND_MODES: SendMode[] = ['email', 'contact_form', 'both']
 
 const EMAIL_CONCURRENCY = 5 // ek saath itne emails; baaki queue me wait karte hain
-
-// User jo count chunta hai use 1..batchSize ke beech clamp karta hai — bina limit ke UI se koi
-// bahut bada number bhi bhej sakta tha
-function clampCount(requested: number | undefined): number {
-  const n = Math.floor(requested ?? config.batchSize)
-  if (!Number.isFinite(n)) return config.batchSize
-  return Math.min(Math.max(n, 1), config.batchSize)
-}
+const DB_CONCURRENCY = 10 // 20 boxes ke leads ek saath dhundhne/banane ke liye
 
 async function logOutreach(
   lead: Lead,
@@ -38,13 +31,15 @@ async function logOutreach(
     .insert({ lead_id: lead.id, channel, kind, subject, body, ok, error: error ?? null })
 }
 
-export type AssistedLead = {
-  slot: number // load ki hui list me kaunsi line — same website kai baar ho to har line ka alag card
-  channel: AssistedChannel // form mila to contact_form, warna website par mila WhatsApp
+// Har website-box (slot) ka apna card — same website kai boxes me ho tab bhi har box ka message alag dikhta hai
+export type SlotCard = {
+  slot: number // 0..19 — kaunsa website box
   lead: Lead
+  channel: AssistedChannel | null // form mila to contact_form, warna website par mila WhatsApp
   subject: string
   body: string
-  emailed: boolean // "Dono" mode me is business ko email bhi chala gaya
+  emailed: boolean // is box ke business ko email gaya (same business ka email ek hi baar, pehle box se)
+  note?: string // skip / email na jaane ki wajah
 }
 
 export type BatchResult = {
@@ -53,25 +48,27 @@ export type BatchResult = {
   failed: number
   skipped: number
   details: { business_name: string; ok: boolean; reason?: string }[]
-  assisted: AssistedLead[] // contact form / WhatsApp — message ready, aap 1 tap me bhejo
+  cards: SlotCard[]
   error?: string // poora batch hi start nahi ho paya (config/DB down waghairah)
 }
 
 function emptyResult(mode: SendMode, error?: string): BatchResult {
-  return { mode, sent: 0, failed: 0, skipped: 0, details: [], assisted: [], error }
+  return { mode, sent: 0, failed: 0, skipped: 0, details: [], cards: [], error }
 }
 
-// ---------- Step 1: LOAD — kin businesses ko is click me bhejna hai ----------
+// ---------- Step 1: LOAD — 20 website boxes ----------
 
 export type LoadedTarget = {
-  input: string // user ne jo line likhi (ya leads list se aaya to business ka naam)
-  lead: Lead | null // null = line samajh nahi aayi / save nahi ho payi
+  slot: number // website box number (0 se)
+  input: string // box me jo likha tha
+  lead: Lead | null // null = samajh nahi aaya / save nahi ho payi
   note?: string // warning: pehle hi contact ho chuka, invalid…
 }
 
 export type LoadResult = { targets: LoadedTarget[]; error?: string }
 
-// Website khol ke (zaroorat ho to asli browser me) contact page / form / WhatsApp dhundho, phir har line par taaza lead + warning
+// Website khol ke (zaroorat ho to asli browser me) contact page / form / WhatsApp dhundho, phir har box par taaza lead + warning.
+// enrichLeads har unique website ko ek hi baar kholta hai, isliye same link 20 baar ho to bhi load fast rehta hai.
 async function enrichAndNote(targets: LoadedTarget[], kind: TemplateKind): Promise<LoadedTarget[]> {
   const enriched = await enrichLeads(targets.flatMap((t) => t.lead ?? []))
   return targets.map((t) => {
@@ -87,46 +84,37 @@ async function enrichAndNote(targets: LoadedTarget[], kind: TemplateKind): Promi
   })
 }
 
-// Leads list se agle `count` businesses (jinka email ya contact page hai)
-export async function loadFromLeads(kind: TemplateKind, count?: number): Promise<LoadResult> {
+// 20 boxes: har box me ek website/contact-page URL (ya email), chahe to aage naam:
+//   "Sharma Dental, sharmadental.com"  ya  "sharmadental.com/contact"
+// Khali box chhod diye jaate hain, par box number (slot) yaad rehta hai. Har box ek lead se jud jaata hai
+// (pehle se hai to wahi, warna nayi) taaki history aur status yahan bhi lage. Same website kai boxes me ho
+// to bhi sab kaam karte hain: website ek hi baar khulti hai, par har box ka message alag milta hai.
+export async function loadFromBoxes(kind: TemplateKind, boxes: string[]): Promise<LoadResult> {
   try {
     await requireAuth()
-    const leads = await getCandidates('both', kind, clampCount(count))
-    const targets = await enrichAndNote(leads.map((lead) => ({ input: lead.business_name, lead })), kind)
-    revalidatePath('/leads')
-    return { targets }
-  } catch (err) {
-    return { targets: [], error: err instanceof Error ? err.message : 'Kuch galat ho gaya' }
-  }
-}
+    if (!Array.isArray(boxes)) return { targets: [], error: 'Websites ki list nahi mili' }
+    const entries = boxes
+      .slice(0, config.batchSize)
+      .map((text, slot) => ({ slot, input: String(text ?? '').trim() }))
+      .filter((e) => e.input)
+    if (entries.length === 0) return { targets: [], error: 'Kam se kam ek website ka link daalo' }
 
-// Apni list: har line me ek email ya website/contact-page URL, chahe to aage naam:
-//   "Sharma Dental, info@sharmadental.com"  ya  "sharmadental.com/contact"
-// Har line ek lead se jud jaati hai (pehle se hai to wahi, warna nayi ban jaati hai) taaki
-// history aur status yahan bhi lage. Same website kai baar likho to har line alag slot hai —
-// contact page ka message har line ke liye alag milta hai (testing ke liye); email fir bhi ek hi jaata hai.
-export async function loadFromList(kind: TemplateKind, text: string): Promise<LoadResult> {
-  try {
-    await requireAuth()
-    const lines = String(text ?? '')
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-    if (lines.length === 0) return { targets: [], error: 'List khaali hai — har line me ek email ya website likho' }
-    if (lines.length > config.batchSize)
-      return { targets: [], error: `Ek click me max ${config.batchSize} lines — abhi ${lines.length} hain` }
+    const parsed = entries.map((e) => ({ ...e, parsed: parseTargetLine(e.input) }))
 
-    const targets: LoadedTarget[] = []
-    for (const line of lines) {
-      const parsed = parseTargetLine(line)
-      if (!parsed) {
-        targets.push({ input: line, lead: null, note: 'Email ya website samajh nahi aayi' })
-        continue
-      }
-      targets.push({ input: line, lead: await findOrCreateLead(parsed) })
-    }
+    // Same website/email ek hi baar DB me dhundho/banao (parallel), phir sab boxes ko baant do
+    const uniques = new Map<string, ParsedTarget>()
+    for (const e of parsed) if (e.parsed) uniques.set(targetKey(e.parsed), e.parsed)
+    const keys = [...uniques.keys()]
+    const leads = await mapLimit(keys, DB_CONCURRENCY, (key) => findOrCreateLead(uniques.get(key)!))
+    const byKey = new Map(keys.map((k, i) => [k, leads[i]]))
+
+    const targets: LoadedTarget[] = parsed.map((e) =>
+      e.parsed
+        ? { slot: e.slot, input: e.input, lead: byKey.get(targetKey(e.parsed))! }
+        : { slot: e.slot, input: e.input, lead: null, note: 'Email ya website samajh nahi aayi' },
+    )
     const enriched = await enrichAndNote(targets, kind)
-    revalidatePath('/leads')
+    revalidatePath('/queue')
     return { targets: enriched }
   } catch (err) {
     return { targets: [], error: err instanceof Error ? err.message : 'Kuch galat ho gaya' }
@@ -134,6 +122,8 @@ export async function loadFromList(kind: TemplateKind, text: string): Promise<Lo
 }
 
 type ParsedTarget = { business_name: string; email: string | null; website: string | null; contact_url: string | null }
+
+const targetKey = (p: ParsedTarget) => (p.email ? `e:${p.email}` : `w:${p.website}`)
 
 function parseTargetLine(line: string): ParsedTarget | null {
   const parts = line.split(',').map((p) => p.trim()).filter(Boolean)
@@ -179,23 +169,25 @@ async function findLead(p: ParsedTarget): Promise<Lead | null> {
   return (data?.[0] as Lead | undefined) ?? null
 }
 
-// ---------- Step 2: SEND — load kiye hue businesses ko, chune hue mode se ----------
+// ---------- Step 2: SEND — load kiye hue boxes ko, chune hue mode se ----------
 
 // mode decide karta hai kya jaata hai:
-// - 'email': jinka email hai unhe aapki SMTP se automatic email
+// - 'email': jinka email hai unhe aapki SMTP se automatic email (har business ko ek hi baar)
 // - 'contact_form': contact form mila to uska message ready; form nahi to website par mila WhatsApp
-//   (message bhara hua khulta hai) — aap 1 tap me bhejte ho aur "Sent" dabate ho. Dono nahi to skip
+//   (message bhara hua khulta hai) — aap 1 tap me bhejte ho aur "Sent" dabate ho
 // - 'both': email automatic + upar wala contact form / WhatsApp message ready
-// leadIds = load ki hui lines ke hisaab se (same business kai baar ho sakta hai): email har business ko
-// ek hi baar, contact form / WhatsApp ka message har line (slot) ke liye alag.
-export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: string[]): Promise<BatchResult> {
+// Result me har box (slot) ka apna card aata hai — message + SMS link — chahe website same ho ya alag.
+export async function sendToLoaded(mode: SendMode, kind: TemplateKind, entries: { slot: number; leadId: string }[]): Promise<BatchResult> {
   try {
     await requireAuth()
     if (!SEND_MODES.includes(mode)) return emptyResult('email', 'Invalid mode')
 
-    const slots = (leadIds ?? []).map(String).slice(0, config.batchSize)
-    const ids = [...new Set(slots)]
-    if (ids.length === 0) return emptyResult(mode, 'Pehle businesses load karo')
+    const slots = (Array.isArray(entries) ? entries : [])
+      .slice(0, config.batchSize)
+      .map((e) => ({ slot: Number(e?.slot), leadId: String(e?.leadId ?? '') }))
+      .filter((e) => Number.isInteger(e.slot) && e.slot >= 0 && e.leadId)
+    const ids = [...new Set(slots.map((e) => e.leadId))]
+    if (ids.length === 0) return emptyResult(mode, 'Pehle websites load karo')
 
     const templates = await getTemplates()
     const template = templates.find((t) => t.kind === kind)
@@ -212,12 +204,13 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
     let emailSlots = mode === 'contact_form' ? 0 : Math.max(0, config.dailyLimit - (await emailsSentLast24h()))
 
     const me = getMe()
-    const ready = new Map<string, { channel: AssistedChannel; emailed: boolean }>() // lead id -> card banana hai
+    const outcome = new Map<string, { emailed: boolean; note?: string }>() // lead id -> email ka nateeja
 
     await mapLimit(leads, EMAIL_CONCURRENCY, async (lead) => {
       const skip = (reason: string) => {
         result.skipped++
         result.details.push({ business_name: lead.business_name, ok: false, reason })
+        outcome.set(lead.id, { emailed: false, note: reason })
       }
 
       const optedOut = optedOutReason(lead)
@@ -227,8 +220,7 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
       // Contact form / WhatsApp / SMS par koi round limit nahi — jitni baar chaho.
       const emailBlocked = lead.email ? ineligibleReason(lead, kind) : null
       const hasEmail = mode !== 'contact_form' && !!lead.email && !emailBlocked
-      const channel = mode === 'email' ? null : assistedChannel(lead)
-      const useForm = !!channel
+      const useForm = mode !== 'email' && !!assistedChannel(lead)
       // Slot await se pehle le lete hain taaki parallel workers limit cross na karein
       const useEmail = hasEmail && emailSlots > 0
       if (useEmail) emailSlots--
@@ -238,49 +230,53 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
         if (mode === 'email') return skip(emailBlocked ?? 'Is business ka email nahi hai')
         return skip(NOT_AVAILABLE)
       }
+      if (!useEmail) return outcome.set(lead.id, { emailed: false })
 
-      let emailed = false
-      if (useEmail) {
-        const claimed = await claimLead(lead, kind)
-        if (!claimed) return skip('Kisi aur tab/click ne already claim kar liya')
+      const claimed = await claimLead(lead, kind)
+      if (!claimed) return skip('Kisi aur tab/click ne already claim kar liya')
 
-        const subject = renderTemplate(template.subject, lead, me)
-        const body = renderEmailBody(template.body, lead, me)
-        try {
-          await sendMail(lead.email!, subject, body)
-          await logOutreach(lead, 'email', kind, subject, body, true)
-          emailed = true
-          result.sent++
-          result.details.push({ business_name: lead.business_name, ok: true })
-        } catch (err) {
-          // Fail hua to status wapas rollback, agli baar retry ho sake
-          await releaseLead(lead)
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          await logOutreach(lead, 'email', kind, subject, body, false, message)
-          result.failed++
-          result.details.push({ business_name: lead.business_name, ok: false, reason: message })
-        }
+      const subject = renderTemplate(template.subject, lead, me)
+      const body = renderEmailBody(template.body, lead, me)
+      try {
+        await sendMail(lead.email!, subject, body)
+        await logOutreach(lead, 'email', kind, subject, body, true)
+        outcome.set(lead.id, { emailed: true })
+        result.sent++
+        result.details.push({ business_name: lead.business_name, ok: true })
+      } catch (err) {
+        // Fail hua to status wapas rollback, agli baar retry ho sake
+        await releaseLead(lead)
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        await logOutreach(lead, 'email', kind, subject, body, false, message)
+        result.failed++
+        result.details.push({ business_name: lead.business_name, ok: false, reason: message })
+        outcome.set(lead.id, { emailed: false, note: `Email fail: ${message}` })
       }
-
-      if (channel) ready.set(lead.id, { channel, emailed })
     })
 
-    // Har line (slot) ka apna card, load kiye hue order me
-    result.assisted = slots.flatMap((id, slot) => {
-      const lead = byId.get(id)
-      const r = ready.get(id)
-      if (!lead || !r) return []
-      return [{
-        slot,
-        channel: r.channel,
-        lead,
-        subject: renderTemplate(template.subject, lead, me),
-        body: renderTemplate(template.body, lead, me),
-        emailed: r.emailed,
-      }]
-    })
+    // Har box ka apna card, box ke order me. Same business ka email sirf pehle box ko gaya.
+    const emailShown = new Set<string>()
+    result.cards = slots
+      .sort((a, b) => a.slot - b.slot)
+      .flatMap(({ slot, leadId }) => {
+        const lead = byId.get(leadId)
+        if (!lead) return []
+        const o = outcome.get(leadId)
+        const emailed = !!o?.emailed && !emailShown.has(leadId)
+        let note = o?.note
+        if (o?.emailed && !emailed) note = 'Same business — email pehle box se ja chuka (ek hi baar jaata hai)'
+        if (emailed) emailShown.add(leadId)
+        return [{
+          slot,
+          lead,
+          channel: mode === 'email' || o?.note ? null : assistedChannel(lead),
+          subject: renderTemplate(template.subject, lead, me),
+          body: renderTemplate(template.body, lead, me),
+          emailed,
+          note,
+        }]
+      })
 
-    revalidatePath('/leads')
     revalidatePath('/queue')
     revalidatePath('/history')
     return result
@@ -315,7 +311,6 @@ export async function markAssistedSent(
     else if (lead.status === 'new') await claimLead(lead, 'first') // follow-up chuna tha par pehli baar ja raha
 
     await logOutreach(lead, channel, kind, subject, body, true)
-    revalidatePath('/leads')
     revalidatePath('/queue')
     revalidatePath('/history')
     return { ok: true }

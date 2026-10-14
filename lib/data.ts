@@ -1,13 +1,7 @@
 import 'server-only'
 import { config } from './config'
 import { db } from './supabase'
-import { STATUS_LABELS, STATUSES, type Lead, type LeadStatus, type OutreachLogEntry, type SendMode, type Template, type TemplateKind } from './types'
-
-export async function getAllLeads(): Promise<Lead[]> {
-  const { data, error } = await db().from('leads').select('*').order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return data as Lead[]
-}
+import { STATUS_LABELS, STATUSES, type Lead, type LeadStatus, type OutreachLogEntry, type Template, type TemplateKind } from './types'
 
 export async function getTemplates(): Promise<Template[]> {
   const { data, error } = await db().from('templates').select('*').order('created_at')
@@ -17,25 +11,6 @@ export async function getTemplates(): Promise<Template[]> {
 
 function followupCutoff(): string {
   return new Date(Date.now() - config.followupDays * 86_400_000).toISOString()
-}
-
-// Batch ke liye leads: har business ko pehla message sirf ek baar, follow-up limit ke andar
-// (Supabase-js ke chained builder types deeply generic hain isliye yahan `any` se chain karte hain;
-//  result Lead[] me cast hota hai, so runtime shape wahi controlled rehta hai.)
-// mode: 'email' = jinka email hai; baaki modes me jinka contact page ya website hai (website se contact
-// page / WhatsApp / phone load par khud dhundha jaata hai)
-export async function getCandidates(mode: SendMode, kind: TemplateKind, limit: number): Promise<Lead[]> {
-  let query: any = db().from('leads').select('*') // eslint-disable-line @typescript-eslint/no-explicit-any
-  if (mode === 'email') query = query.not('email', 'is', null)
-  else if (mode === 'contact_form') query = query.or('contact_url.not.is.null,website.not.is.null')
-  else query = query.or('email.not.is.null,contact_url.not.is.null,website.not.is.null')
-  query =
-    kind === 'first'
-      ? query.eq('status', 'new')
-      : query.eq('status', 'contacted').lt('followups_sent', config.maxFollowups).lt('last_contacted_at', followupCutoff())
-  const { data, error } = await query.order('created_at').limit(limit)
-  if (error) throw new Error(error.message)
-  return data as Lead[]
 }
 
 export async function getStatusCounts(): Promise<Record<LeadStatus, number>> {

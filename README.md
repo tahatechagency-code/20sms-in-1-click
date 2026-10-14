@@ -6,12 +6,12 @@ kisi ek website ko baar-baar spam nahi.
 
 ## Kya karta hai
 
-- **Leads:** business ka naam, website, email ya contact-page link, status (new → contacted → replied → won)
 - **Templates:** ek "pehla message" aur ek "follow-up" template, `{business_name}`, `{website}`,
   `{contact_person}`, `{my_name}`, `{my_portfolio}` placeholders ke saath
 - **Send Batch — 2 step:**
-  1. **Load:** max 20 websites load karo — ya to **apni list** paste karo (har line me ek email ya
-     website/contact-page URL, chahe to aage naam: `Gupta Bakery, guptabakery.in`), ya **leads list se agle N**.
+  1. **Load:** 20 boxes (Website 1 … Website 20) me link daalo (har box me ek website/contact-page URL ya email, chahe to aage
+     naam: `Gupta Bakery, guptabakery.in`; kai lines ek saath paste karo to boxes me bant jaati hain). **Same link kai boxes me
+     bhi chalta hai** — website ek hi baar khulti hai par har box ka apna message milta hai.
      Load par app **khud har website kholta hai** aur dhundhta hai:
      - **Contact us page** (homepage ke links se, warna `/contact`, `/contact-us`…)
      - us par **contact form hai ya nahi** (normal `<form>` + WordPress CF7/WPForms, Google Forms, Typeform, HubSpot, Zoho…)
@@ -71,8 +71,7 @@ websites ko asli browser me kholne ke liye; Vercel par apne aap, local par aapka
    npm install
    npm run dev
    ```
-4. `/leads` par businesses add karo (manually ya CSV se), `/templates` me apna message likho,
-   `/queue` par batch bhejo.
+4. `/templates` me apna message likho, `/queue` par 20 website links daalo aur batch bhejo.
 
 ## Vercel par deploy
 

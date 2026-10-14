@@ -126,3 +126,6 @@ tr:last-child td { border-bottom: none; }
 .mode .t { color: var(--text); font-weight: 500; }
 .mode .d { grid-column: 2; font-size: 12px; }
 a.btn { display: inline-block; color: #fff; text-decoration: none; }
+
+.boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 12px; margin-bottom: 8px; }
+.box label { margin-bottom: 2px; font-size: 12px; }

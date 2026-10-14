@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { requireAuth } from '@/lib/auth'
 import { db } from '@/lib/supabase'
-import type { ActionResult } from './leads'
+
+export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
 export async function saveTemplate(id: string, formData: FormData): Promise<ActionResult> {
   await requireAuth()
