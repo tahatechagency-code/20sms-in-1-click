@@ -33,6 +33,9 @@ kisi ek website ko baar-baar spam nahi.
 - **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
   configurable din baad, aur ek limited baar
 - **Kitne bhejne hai, aap chuno:** 1 se `BATCH_SIZE` tak — aaj 10 chahiye to 10, kal 20 chahiye to 20
+- **Customer se baat (Leads page):** jis business ka WhatsApp/phone mila ho uske saamne **"WhatsApp chat"** aur
+  **"SMS"** button — chat jitni baar chaho kholo, koi limit nahi. Batch ka "ek business ko ek round me ek message"
+  rule sirf cold outreach ke liye hai. Customer ka WhatsApp number khud bhi add kar sakte ho (+ country code ke saath)
 - **History page (`/history`):** batch ke har click ka poora record — kaun sa business/website,
   kab, kaunsa message, Sent ya Failed (fail hua to reason bhi)
 - Password-protected dashboard (sirf aapke liye — signup nahi hai)

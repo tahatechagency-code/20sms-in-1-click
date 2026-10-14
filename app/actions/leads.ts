@@ -19,10 +19,15 @@ export async function addLead(formData: FormData): Promise<ActionResult> {
   const email = normalizeEmail(String(formData.get('email') ?? ''))
   const contactUrl = normalizeUrl(String(formData.get('contact_url') ?? ''))
   const contactPerson = String(formData.get('contact_person') ?? '').trim() || null
+  const rawWhatsapp = String(formData.get('whatsapp') ?? '').trim()
+  // Sirf + country code wala number — bina code ke andaaza lagaya to galat desh par chat khulti
+  const whatsapp = /^\+\s*[\d\s()-]{8,}$/.test(rawWhatsapp) ? rawWhatsapp.replace(/\D/g, '') : null
+  if (rawWhatsapp && (!whatsapp || whatsapp.length < 8 || whatsapp.length > 15))
+    return { ok: false, error: 'WhatsApp number + country code ke saath likho, jaise +44 7700 900123' }
   const notes = String(formData.get('notes') ?? '').trim() || null
 
-  if (!email && !contactUrl && !website)
-    return { ok: false, error: 'Email, website ya contact page link me se kam se kam ek do' }
+  if (!email && !contactUrl && !website && !whatsapp)
+    return { ok: false, error: 'Email, website, contact page ya WhatsApp me se kam se kam ek do' }
 
   const { error } = await db().from('leads').insert({
     business_name: businessName,
@@ -31,6 +36,7 @@ export async function addLead(formData: FormData): Promise<ActionResult> {
     contact_url: contactUrl,
     contact_person: contactPerson,
     notes,
+    ...(whatsapp ? { whatsapp } : {}),
   })
   if (error) {
     if (error.code === '23505') return { ok: false, error: 'Yeh business (email/website) pehle se list me hai' }
