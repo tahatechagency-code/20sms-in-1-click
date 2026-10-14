@@ -26,13 +26,17 @@ kisi ek website ko baar-baar spam nahi.
      - **Dono:** email automatic + upar wala form/WhatsApp/SMS
   - **Same website kai baar (testing):** list me ek hi website jitni baar likhoge, utne alag message cards banenge
     (har line apna slot, har "Sent" history me alag record). Email fir bhi har business ko ek hi baar jaata hai
-  - Ek round ke baad woh website "Contacted" ho jaati hai; dobara test karna ho to `/leads` par uska status wapas
-    **New** kar do
+  - **Contacted ke baad bhi:** contact form / WhatsApp / SMS jitni baar chaho bhejo — website dobara load karo aur
+    bhejo. Sirf **email** par purana rule hai (pehla message ek hi baar, follow-up `FOLLOWUP_DAYS` / `MAX_FOLLOWUPS`
+    ke hisaab se). Status **"Not interested"** ya **"Do not contact"** ho to kisi bhi raste se kuch nahi jaata
   - Form / WhatsApp / SMS ka aakhri "Send" aap khud dabate ho: bot se form submit karna ya WhatsApp/SMS automatic
     bhejna CAPTCHA me atakta hai, aur WhatsApp unknown numbers ko bulk message par number ban kar deta hai
-- **Duplicate/spam-proof:** ek business ko pehla message sirf ek baar jaata hai; follow-up sirf
-  configurable din baad, aur ek limited baar
+- **Email spam-proof:** ek business ko pehla email sirf ek baar jaata hai; follow-up email sirf
+  configurable din baad, aur ek limited baar (form / WhatsApp / SMS par yeh limit nahi)
 - **Kitne bhejne hai, aap chuno:** 1 se `BATCH_SIZE` tak — aaj 10 chahiye to 10, kal 20 chahiye to 20
+- **Customer se baat (Leads page):** jis business ka WhatsApp/phone mila ho uske saamne **"WhatsApp chat"** aur
+  **"SMS"** button — chat jitni baar chaho kholo, koi limit nahi. Batch ka "ek business ko ek round me ek message"
+  rule sirf cold outreach ke liye hai. Customer ka WhatsApp number khud bhi add kar sakte ho (+ country code ke saath)
 - **History page (`/history`):** batch ke har click ka poora record — kaun sa business/website,
   kab, kaunsa message, Sent ya Failed (fail hua to reason bhi)
 - Password-protected dashboard (sirf aapke liye — signup nahi hai)

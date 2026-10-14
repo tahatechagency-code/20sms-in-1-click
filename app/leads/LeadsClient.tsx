@@ -40,7 +40,7 @@ export default function LeadsClient({ leads }: { leads: Lead[] }) {
   return (
     <div>
       <h1>Leads</h1>
-      <p className="sub">Jin businesses ko contact karna hai unki list. Email diya to email jaayega, sirf contact page diya to assisted batch me aayega.</p>
+      <p className="sub">Jin businesses ko contact karna hai unki list. Customer reply kare to "WhatsApp chat" se jitni baar chaho baat karo, aur status "Replied" kar do.</p>
 
       {msg && <div className={`msg ${msg.ok ? 'ok' : 'error'}`}>{msg.text}</div>}
 
@@ -68,6 +68,10 @@ export default function LeadsClient({ leads }: { leads: Lead[] }) {
             </div>
           </div>
           <div className="row">
+            <div className="field">
+              <label>WhatsApp number (optional, + country code ke saath)</label>
+              <input name="whatsapp" placeholder="+44 7700 900123" />
+            </div>
             <div className="field">
               <label>Contact person (optional)</label>
               <input name="contact_person" placeholder="Naam" />
@@ -123,6 +127,21 @@ export default function LeadsClient({ leads }: { leads: Lead[] }) {
                     )}
                     {lead.whatsapp && <div className="pill">WA: +{lead.whatsapp}</div>}
                     {lead.phone && <div className="pill">{lead.phone}</div>}
+                    {(lead.whatsapp || lead.phone) && (
+                      <div className="actions" style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                        {/* Customer se baat: chat jitni baar chaho kholo — yeh batch ka "ek hi message" rule nahi hai */}
+                        {lead.whatsapp && (
+                          <a className="btn small" href={`https://wa.me/${lead.whatsapp}`} target="_blank" rel="noreferrer">
+                            WhatsApp chat
+                          </a>
+                        )}
+                        {lead.phone && (
+                          <a className="btn secondary small" href={`sms:${lead.phone}`}>
+                            SMS
+                          </a>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <select value={lead.status} onChange={(e) => changeStatus(lead.id, e.target.value as LeadStatus)} disabled={pending}>

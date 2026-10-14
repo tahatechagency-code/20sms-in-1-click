@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireAuth } from '@/lib/auth'
 import { config, getMe } from '@/lib/config'
-import { channelsSentThisRound, claimLead, emailsSentLast24h, getCandidates, getTemplates, ineligibleReason, releaseLead } from '@/lib/data'
+import { claimLead, emailsSentLast24h, getCandidates, getTemplates, ineligibleReason, optedOutReason, releaseLead } from '@/lib/data'
 import { sendMail } from '@/lib/mailer'
 import { mapLimit } from '@/lib/pool'
 import { normalizeEmail, normalizeUrl, normalizeWebsite } from '@/lib/normalize'
@@ -80,7 +80,8 @@ async function enrichAndNote(targets: LoadedTarget[], kind: TemplateKind): Promi
     const lead = e.lead
     const note =
       t.note ??
-      ineligibleReason(lead, kind) ??
+      optedOutReason(lead) ??
+      (lead.email && ineligibleReason(lead, kind) ? 'Pehle contact ho chuka — email dobara nahi, form/WhatsApp/SMS jaayega' : undefined) ??
       e.error ??
       (lead.website && !assistedChannel(lead) && !lead.email ? 'Na contact form, na WhatsApp/phone, na email mila' : undefined)
     return { ...t, lead, note }
@@ -220,10 +221,13 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
         result.details.push({ business_name: lead.business_name, ok: false, reason })
       }
 
-      const notEligible = ineligibleReason(lead, kind)
-      if (notEligible) return skip(notEligible)
+      const optedOut = optedOutReason(lead)
+      if (optedOut) return skip(optedOut)
 
-      const hasEmail = mode !== 'contact_form' && !!lead.email
+      // Email par purana rule: pehla message ek hi baar, follow-up sirf din/limit ke andar.
+      // Contact form / WhatsApp / SMS par koi round limit nahi — jitni baar chaho.
+      const emailBlocked = lead.email ? ineligibleReason(lead, kind) : null
+      const hasEmail = mode !== 'contact_form' && !!lead.email && !emailBlocked
       const channel = mode === 'email' ? null : assistedChannel(lead)
       const useForm = !!channel
       // Slot await se pehle le lete hain taaki parallel workers limit cross na karein
@@ -232,7 +236,8 @@ export async function sendToLoaded(mode: SendMode, kind: TemplateKind, leadIds: 
 
       if (!useEmail && !useForm) {
         if (hasEmail) return skip(`Aaj ka email limit (${config.dailyLimit}) poora`)
-        return skip(mode === 'email' ? 'Is business ka email nahi hai' : 'Na contact form mila, na WhatsApp/phone number')
+        if (mode === 'email') return skip(emailBlocked ?? 'Is business ka email nahi hai')
+        return skip('Na contact form mila, na WhatsApp/phone number')
       }
 
       let emailed = false
@@ -301,16 +306,14 @@ export async function markAssistedSent(
     if (error || !data) return { ok: false, error: error?.message ?? 'Lead nahi mila' }
     const lead = data as Lead
 
-    if (ineligibleReason(lead, kind) === null) {
-      // Is round me abhi tak kuch nahi gaya -> normal claim
-      const claimed = await claimLead(lead, kind)
-      if (!claimed) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
-    } else {
-      // Isi round me lead claim ho chuka (email gaya, ya same website ki pichhli line ka message) —
-      // dobara claim nahi (follow-up count do baar na badhe), sirf is submission ka record chahiye
-      const sent = await channelsSentThisRound(lead, kind)
-      if (sent.size === 0) return { ok: false, error: 'Yeh pehle hi mark ho chuka hai' }
-    }
+    const optedOut = optedOutReason(lead)
+    if (optedOut) return { ok: false, error: optedOut }
+
+    // Round ka pehla message hai to status aage badhao (New -> Contacted / follow-up count).
+    // Pehle se Contacted hai to bas record — form / WhatsApp / SMS jitni baar chaho.
+    // (Do tab me ek saath claim fail ho to bhi theek: kisi aur ne abhi status badal diya)
+    if (ineligibleReason(lead, kind) === null) await claimLead(lead, kind)
+    else if (lead.status === 'new') await claimLead(lead, 'first') // follow-up chuna tha par pehli baar ja raha
 
     await logOutreach(lead, channel, kind, subject, body, true)
     revalidatePath('/leads')
